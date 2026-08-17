@@ -17,9 +17,9 @@
 - 🔄 **/new 保留旧对话**：新对话用轮次后缀创建，旧对话完整保存、随时回看
 - 📜 **/history 查询**：微信内直接列出/查看任意历史轮次
 - 🖼️ **媒体支持**：图片/文件自动落盘并给出路径，agent 可读取处理
-- ⚙️ **网页配置页**：`http://127.0.0.1:3080/wxb/config` 浏览器直接改配置，保存即生效
-- 🚀 **一键安装**：`curl .../install.sh | bash`
-- 🔌 **host 组合插件**：写进 `cordis.patch.yml` 后随 DSH 自动加载、7×24 运行
+- 🖥️ **Desktop 设置页**：设置 →「微信桥接」内直接扫码、查看状态、提交手机显示的配对码
+- ⚙️ **网页配置页**：`http://127.0.0.1:3080/wxb/config` 仍可修改 host 配置
+- 🔌 **标准 DSH 插件包**：安装后同时挂载 host 与 Desktop/Web client，不改 DSH 内核
 
 ## 架构
 
@@ -35,45 +35,27 @@
 
 ## 安装
 
-1. 把本仓库复制到 DSH 的 **profile 目录**（默认 `~/.dsh/profiles/web/`）：
-
-### 一键安装（推荐）
+### 安装到 Profile（推荐）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/whj2015/dsh-wechat-bridge/main/install.sh | bash
+dsh plugin --profile web add github:xiagaogaozi/dsh-wechat-bridge
 ```
 
-脚本自动完成：克隆插件到 `~/.dsh/profiles/web/` → 安装依赖 → 注册到
-`cordis.patch.yml` → 提示重启 DSH。
+该命令把包加入 web profile 的依赖和 bundle 列表；包内 `cordis.patch.yml` 会同时注册 bridge host 与可被 Desktop/Web 加载的 client bundle。重启 DSH Desktop 后，打开设置列表中的「微信桥接」：首次登录在其中扫码；手机出现配对码时直接输入并提交。凭据保存在 `bridge/wechat-credentials/`，之后免扫码。
 
-### 手动安装
+### 本地 tarball 安装
 
-1. 把本仓库复制到 DSH 的 **profile 目录**（默认 `~/.dsh/profiles/web/`）：
+```bash
+cd /path/to/dsh-wechat-bridge
+npm pack
+dsh plugin --profile web add ./dsh-wechat-bridge-1.1.5.tgz
+```
 
-   ```bash
-   git clone https://github.com/whj2015/dsh-wechat-bridge ~/.dsh/profiles/web/dsh-wechat-bridge
-   cd ~/.dsh/profiles/web/dsh-wechat-bridge && npm install
-   cd bridge && npm install
-   ```
+不要再把 `index.js` 单独追加到 profile 的 `cordis.patch.yml`；那种旧安装方式只挂载 host，Desktop 无法发现 client 设置页。
 
-2. 编辑 `~/.dsh/profiles/web/cordis.patch.yml`，追加：
+## Desktop 扫码与配对码
 
-   ```yaml
-   - insert:
-       - id: dsh-wechat-bridge
-         name: ./dsh-wechat-bridge/index.js
-         config: {}        # 可选配置见下
-   ```
-
-3. 重启 `dsh`。首次登录扫码有三种方式（任选其一）：
-   - **终端 ASCII 二维码**：DSH 终端日志里直接打印可扫描的二维码（黑白色块）
-   - **浏览器大图**：访问 `http://127.0.0.1:3080/wxb/qr`（仅 127.0.0.1，无鉴权）
-   - **扫码链接**：终端日志打印的链接，微信内打开/转发后长按识别
-   
-   用手机微信（建议小号）扫码确认，凭据保存在 `bridge/wechat-credentials/`，之后免扫码。
-
-> 说明：host 安装没有 Web 面板（动态插件才有），登录后如需看状态，访问
-> `http://127.0.0.1:3080/wxb/status`（JSON）或查看终端日志/WeChat 工作区。
+在 DSH Desktop 的设置列表选择「微信桥接」。该页每 2.5 秒刷新状态，展示二维码、扫码/在线状态、bridge PID，以及微信要求时出现的配对码输入框。点击「重新获取二维码」会受控重启 bridge；bridge 不再继承 Electron 的控制台，因此不会创建可见 Node 黑窗。二维码、配对码提交接口仅接受本机 loopback 请求，远程 Web 页面不能读取或提交它们。
 
 ## 配置页面
 
@@ -98,10 +80,7 @@ host 安装后无需碰终端：浏览器打开 **`http://127.0.0.1:3080/wxb/con
   `workspaceTitle`）在启动时读入常量，保存后需**重启 DSH** 完全生效，页面会提示；
 - 页面上的「恢复默认」按钮可一键清空所有已保存覆盖，回到组合配置。
 
-> 为什么不在原生 Settings 页？DSH 内核（`dsh-host-apiproxy`）对 Web 设置页
-> 渲染的命名空间有**硬编码白名单**（核心插件专属），第三方 host 插件注册的
-> 命名空间会被 `settings-not-exposed` 拒绝，且该扩展点在内核中是"deferred work"。
-> 因此本插件自带独立配置页，无需改动内核、升级不失效。
+> 配置页仍保留给 host 配置；扫码和配对码使用 DSH client 的 `settings.section` 槽位，而不是 DSH settings namespace，因此不需要修改内核白名单。
 
 ## 微信内命令
 

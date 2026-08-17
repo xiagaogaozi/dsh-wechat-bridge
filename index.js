@@ -85,9 +85,13 @@ export default {
       qrState: 'none',
       qrImage: null,
       qrUrl: null,
+      pairingRequired: false,
       bridgeAlive: false,
       bridgePid: null,
       lastHeartbeat: 0,
+      lastExit: null,
+      retryAttempt: 0,
+      nextRetryMs: null,
       since: Date.now(),
     }
     const outbox = []
@@ -100,6 +104,9 @@ export default {
     const userGen = new Map()
     const routeDisposers = []
     let bridgeProc = null
+    let bridgeStarting = false
+    let bridgeRestartNonce = 0
+    let restartAfterStart = false
     let stopping = false
 
     // ---------------- WeChat workspace (GUI grouping) -----------------------
@@ -451,16 +458,22 @@ export default {
         state.qrImage = body.image ? String(body.image) : null
         state.qrUrl = body.url ? String(body.url) : null
         state.qrState = 'waiting'
+        state.pairingRequired = false
+        state.nextRetryMs = null
         state.phase = 'waiting-qr'
         state.detail = '请用手机微信扫描二维码登录（建议使用小号）'
       } else if (t === 'scanned') {
         state.qrState = 'scanned'
+        state.pairingRequired = false
         state.detail = '已扫码，请在手机上确认登录'
       } else if (t === 'qr-expired') {
         state.qrState = 'expired'
         state.detail = '二维码已过期，bridge 正在获取新二维码…'
       } else if (t === 'logged-in') {
         state.qrState = 'online'
+        state.pairingRequired = false
+        state.retryAttempt = 0
+        state.nextRetryMs = null
         state.phase = 'online'
         state.detail = '微信登录成功，在线监听中（account=' + String(body.accountId || '') + '）'
       } else if (t === 'heartbeat') {
@@ -470,7 +483,14 @@ export default {
       } else if (t === 'bridge-start') {
         state.bridgeAlive = true
         state.bridgePid = Number(body.pid) || null
+        state.lastExit = null
         if (state.phase !== 'waiting-qr') { state.phase = 'connecting'; state.detail = 'bridge 进程已启动，正在登录微信…' }
+      } else if (t === 'login-retry') {
+        const delayMs = Number(body.delayMs)
+        state.bridgeAlive = true
+        state.phase = 'waiting-qr'
+        state.nextRetryMs = Number.isFinite(delayMs) && delayMs > 0 ? delayMs : null
+        state.detail = '微信登录请求超时，bridge 保持运行并将在短暂等待后刷新二维码'
       } else if (t === 'bridge-stop') {
         state.bridgeAlive = false
         state.detail = 'bridge 已停止'
@@ -484,10 +504,15 @@ export default {
         state.phase = 'expired'
         state.detail = '会话过期，bridge 正在重新登录…'
       } else if (t === 'session-restored' || t === 'poll-start') {
+        state.pairingRequired = false
+        state.retryAttempt = 0
+        state.nextRetryMs = null
         state.phase = 'online'
         state.detail = '在线监听中'
       } else if (t === 'verify-code-required') {
-        state.detail = '需要输入配对码（在运行 DSH 的终端里查看并输入）'
+        state.pairingRequired = true
+        state.phase = 'waiting-pair-code'
+        state.detail = '请在 Desktop 设置页输入手机微信显示的配对码'
       }
     }
 
@@ -498,6 +523,10 @@ export default {
       qrState: state.qrState,
       bridgeAlive: state.bridgeAlive,
       bridgePid: state.bridgePid,
+      pairingRequired: state.pairingRequired,
+      lastExit: state.lastExit,
+      retryAttempt: state.retryAttempt,
+      nextRetryMs: state.nextRetryMs,
       users: Array.from(userAgents.keys()),
       outboxDepth: outbox.length,
       since: state.since,
@@ -543,6 +572,53 @@ export default {
     routeDisposers.push(ws.register({ kind: 'exact', path: BASE + '/status', handler: async (req, res) => {
       if (!authorized(req)) return sendJson(res, 401, { error: 'unauthorized' })
       sendJson(res, 200, statusSnapshot())
+    }}))
+
+    // Desktop renders this through the regular DSH client-plugin surface.  The
+    // QR image and pairing action stay loopback-only: the bridge is a personal
+    // WeChat login, so neither should be exposed by a remote Web profile.
+    const isLoopbackRequest = (req) => {
+      const address = String((req.socket && req.socket.remoteAddress) || '').toLowerCase()
+      return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+    }
+    const desktopSnapshot = () => ({
+      ...statusSnapshot(),
+      qrImage: state.qrImage,
+      qrUrl: state.qrUrl,
+    })
+    const submitPairingCode = (raw) => {
+      const code = String(raw || '').trim()
+      if (!state.pairingRequired) return { ok: false, error: '当前没有等待输入的配对码' }
+      if (!code || code.length > 128 || /[\r\n]/.test(code)) return { ok: false, error: '配对码格式无效' }
+      const input = bridgeProc && bridgeProc.stdin
+      if (!input || input.destroyed || !input.writable) return { ok: false, error: 'bridge 当前不能接收配对码，请重启 bridge 后重试' }
+      try {
+        input.write(code + '\n')
+        state.pairingRequired = false
+        state.detail = '配对码已提交，等待微信确认…'
+        return { ok: true }
+      } catch (err) {
+        return { ok: false, error: '提交配对码失败：' + String((err && err.message) || err).slice(0, 200) }
+      }
+    }
+    routeDisposers.push(ws.register({ kind: 'exact', path: '/plugins/dsh-wechat-bridge/desktop', handler: async (req, res) => {
+      if (!isLoopbackRequest(req)) return sendJson(res, 403, { error: 'Desktop pairing controls are available only from this computer' })
+      if (req.method === 'GET') return sendJson(res, 200, desktopSnapshot())
+      if (req.method !== 'POST') {
+        res.writeHead(405, { Allow: 'GET, POST' })
+        return res.end()
+      }
+      const body = await readBody(req)
+      const action = String(body && body.action || '')
+      if (action === 'restart-bridge') {
+        restartBridge()
+        return sendJson(res, 200, { ok: true, snapshot: desktopSnapshot() })
+      }
+      if (action === 'submit-pairing-code') {
+        const result = submitPairingCode(body && body.code)
+        return sendJson(res, result.ok ? 200 : 400, { ...result, snapshot: desktopSnapshot() })
+      }
+      return sendJson(res, 400, { ok: false, error: 'unknown action' })
     }}))
 
     // Browser page showing the login QR — the host install has no GUI panel,
@@ -704,23 +780,38 @@ export default {
       res.end(configPageHtml())
     }}))
 
+    const scheduleBridgeStart = (delayMs) => {
+      const nonce = ++bridgeRestartNonce
+      state.nextRetryMs = delayMs
+      ctx.timeout(() => {
+        if (stopping || nonce !== bridgeRestartNonce) return
+        state.nextRetryMs = null
+        startBridge()
+      }, delayMs)
+    }
+
     const startBridge = async () => {
-      if (stopping) return
+      if (stopping || bridgeProc || bridgeStarting) return
       if (!sub) {
         state.phase = 'error'
         state.detail = 'subprocess 服务不可用，请手动运行 bridge：node ' + BRIDGE_DIR + '/bridge.js'
         return
       }
+      bridgeStarting = true
+      const nonce = bridgeRestartNonce
       state.phase = 'starting-bridge'
       state.detail = '正在启动 bridge 进程…'
       try {
         let nodePath = null
         try { nodePath = await sub.resolveExecutable('node') } catch (e) { nodePath = null }
         const argv = nodePath ? [nodePath, BRIDGE_DIR + '/bridge.js'] : ['node', BRIDGE_DIR + '/bridge.js']
-        bridgeProc = sub.spawn({
+        const proc = sub.spawn({
           argv,
           cwd: BRIDGE_DIR,
-          stdio: { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' },
+          // Electron is launched by Explorer, so inherited Node descriptors
+          // create a visible console window. Keep bounded diagnostics inside
+          // DSH and rely on bridge/bridge.log for persistent diagnostics.
+          stdio: { stdin: 'pipe', stdout: { maxBytes: 65536 }, stderr: { maxBytes: 65536 } },
           graceMs: 3000,
           env: {
             DSH_BASE_URL: 'http://' + ws.host + ':' + ws.port,
@@ -729,28 +820,64 @@ export default {
             WECHAT_BOT_AGENT: 'DSH-WeChat-Bridge/1.0',
           },
         })
-        state.bridgePid = bridgeProc.pid
-        bridgeProc.done.then((outcome) => {
+        if (stopping || nonce !== bridgeRestartNonce) {
+          try { proc.terminate() } catch (e) {}
+          return
+        }
+        bridgeProc = proc
+        state.bridgePid = proc.pid
+        proc.done.then((outcome) => {
+          if (nonce !== bridgeRestartNonce || bridgeProc !== proc) return
+          bridgeProc = null
           state.bridgeAlive = false
           state.bridgePid = null
+          state.pairingRequired = false
+          state.lastExit = { exitCode: outcome.exitCode, signal: outcome.signal }
           console.log('[wechat] bridge exited:', JSON.stringify(outcome))
           if (!stopping) {
-            state.detail = 'bridge 进程退出（code=' + outcome.exitCode + '），3 秒后自动重启'
-            ctx.timeout(() => startBridge(), 3000)
+            state.retryAttempt += 1
+            const delayMs = Math.min(30000, 3000 * (2 ** Math.min(state.retryAttempt - 1, 3)))
+            state.detail = 'bridge 进程退出（code=' + outcome.exitCode + '），' + Math.round(delayMs / 1000) + ' 秒后重试'
+            scheduleBridgeStart(delayMs)
           }
+        }, (err) => {
+          if (nonce !== bridgeRestartNonce || bridgeProc !== proc) return
+          bridgeProc = null
+          state.bridgeAlive = false
+          state.bridgePid = null
+          state.phase = 'error'
+          state.detail = 'bridge 运行失败：' + String((err && err.message) || err).slice(0, 200)
         })
       } catch (err) {
         console.error('[wechat] bridge spawn failed:', err)
         state.phase = 'error'
         state.detail = 'bridge 启动失败：' + String((err && err.message) || err).slice(0, 200)
+      } finally {
+        bridgeStarting = false
+        if (restartAfterStart && !stopping && !bridgeProc) {
+          restartAfterStart = false
+          scheduleBridgeStart(0)
+        }
       }
     }
 
     const restartBridge = () => {
+      bridgeRestartNonce += 1
+      state.retryAttempt = 0
+      state.nextRetryMs = 800
+      state.pairingRequired = false
+      state.detail = '正在重启 bridge 进程…'
+      if (bridgeStarting) restartAfterStart = true
       const p = bridgeProc
       bridgeProc = null
       if (p) { try { p.terminate() } catch (e) {} }
-      ctx.timeout(() => startBridge(), 800)
+      const nonce = bridgeRestartNonce
+      ctx.timeout(() => {
+        if (!stopping && nonce === bridgeRestartNonce) {
+          state.nextRetryMs = null
+          startBridge()
+        }
+      }, 800)
     }
 
     ctx.effect(() => {
@@ -759,6 +886,7 @@ export default {
       startBridge()
       return () => {
         stopping = true
+        bridgeRestartNonce += 1
         if (bridgeProc) { try { bridgeProc.terminate() } catch (e) {} }
         for (const d of routeDisposers) { try { d() } catch (e) {} }
         routeDisposers.length = 0

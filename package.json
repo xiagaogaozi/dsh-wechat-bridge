@@ -1,15 +1,62 @@
 {
   "name": "dsh-wechat-bridge",
-  "version": "1.0.0",
+  "version": "1.1.5",
   "description": "DSH WeChat Bridge: connect a personal WeChat account (iLink protocol) to DeepSeek Harness agents",
   "type": "module",
   "main": "index.js",
-  "private": true,
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "bridge/bridge.js",
+    "bridge/package.json",
+    "bridge/package-lock.json",
+    "cordis.patch.yml",
+    "install.sh",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
   "engines": {
     "node": ">=22"
   },
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.1"
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@wechatbot/wechatbot": "^2.2.0",
+    "qrcode": "^1.5.4"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "react": "^18.2.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "dshClient": {
+    "inject": [
+      "@deepseek-ai/dsh-client-runtime",
+      "@deepseek-ai/dsh-client-ui-primitives",
+      "@deepseek-ai/dsh-client-ui-settings"
+    ],
+    "platform": "web"
+  },
+  "scripts": {
+    "test": "node tests/desktop-spawn-contract.mjs && node tests/desktop-client-contract.mjs && node tests/bridge-login-retry-contract.mjs"
   }
 }

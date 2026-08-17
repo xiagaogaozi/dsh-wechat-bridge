@@ -1,0 +1,6 @@
+# dsh-wechat-bridge bundle patch: install the host half from the same package
+# that supplies the Desktop client settings page.
+- insert:
+    - id: dsh-wechat-bridge
+      name: dsh-wechat-bridge
+      config: {}

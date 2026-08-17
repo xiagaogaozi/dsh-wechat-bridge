@@ -58,6 +58,7 @@ const ALLOW_USERS = (process.env.WECHAT_ALLOW_USERS || '')
   .map((s) => s.trim())
   .filter(Boolean)
 const BOT_AGENT = process.env.WECHAT_BOT_AGENT || 'DSH-WeChat-Bridge/0.1'
+const PRINT_ASCII_QR = process.env.WECHAT_PRINT_ASCII_QR === '1'
 // Media download directory — must live INSIDE the DSH workspace so the agent
 // (sandboxed to workspace-write) can read the files via read_image / read.
 const MEDIA_DIR = process.env.WECHAT_MEDIA_DIR
@@ -116,9 +117,9 @@ async function qrDataUrl(loginUrl) {
 }
 
 /** Print a scannable ASCII QR to the terminal (host installs have no panel). */
-function printAsciiQr(loginUrl) {
+async function printAsciiQr(loginUrl) {
   try {
-    const art = QRCode.toString(loginUrl, { type: 'terminal', small: true })
+    const art = await QRCode.toString(loginUrl, { type: 'terminal', small: true })
     console.log(art)
   } catch (err) {
     console.error('[bridge] ASCII QR render failed:', err?.message || err)
@@ -128,7 +129,7 @@ function printAsciiQr(loginUrl) {
 async function onQrUrl(url) {
   console.log('\n========== 微信扫码登录 ==========')
   console.log('请用手机微信扫描下方二维码（或用浏览器打开 /wxb/qr 查看大图）：')
-  printAsciiQr(url)
+  if (PRINT_ASCII_QR) void printAsciiQr(url)
   console.log('扫码链接（二维码无法显示时）：')
   console.log(url)
   console.log('==================================\n')
@@ -245,10 +246,10 @@ async function onMessage(msg) {
 // Outbound loop: long-poll the DSH outbox and send replies to WeChat
 // ---------------------------------------------------------------------------
 
-async function outboxLoop() {
+async function outboxLoop(activeBot, generation) {
   let cursor = 0
   let consecutiveErrors = 0
-  while (!stopping) {
+  while (!stopping && generation === connectionGeneration) {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 30000)
     try {
@@ -257,6 +258,7 @@ async function outboxLoop() {
         headers: { Authorization: 'Bearer ' + TOKEN },
         signal: ctrl.signal,
       })
+      if (stopping || generation !== connectionGeneration) break
       if (!res.ok) {
         consecutiveErrors++
         console.error(`[outbox] poll HTTP ${res.status}; waiting 5s`)
@@ -268,14 +270,15 @@ async function outboxLoop() {
       const msgs = data.messages || []
       console.log(`[outbox] got ${msgs.length} message(s), cursor=${data.cursor}`)
       for (const m of msgs) {
+        if (stopping || generation !== connectionGeneration) break
         console.log(`[outbox] sending to ${m.userId}: ${String(m.text).slice(0, 60)}`)
         try {
           // Light markdown cleanup so code fences / headers read well in WeChat.
           const clean = (m.text || '').replace(/```[^\n]*\n?/g, '`').replace(/^#{1,6}\s+/gm, '').trim()
           console.log(`[outbox] bot.send start (id=${m.id})`)
-          await bot.send(m.userId, { text: clean || '…' })
+          await activeBot.send(m.userId, { text: clean || '…' })
           console.log(`[outbox] bot.send OK (id=${m.id})`)
-          await bot.stopTyping(m.userId).catch(() => {})
+          await activeBot.stopTyping(m.userId).catch(() => {})
         } catch (err) {
           console.error(`[outbox] send to ${m.userId} FAILED (id=${m.id}): ${err?.message || err}`)
         }
@@ -304,6 +307,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 let bot
 let stopping = false
+let connectionGeneration = 0
+
+function loginRetryDelay(attempt) {
+  return Math.min(30000, 2000 * (2 ** Math.min(Math.max(attempt - 1, 0), 4)))
+}
+
+function errorMessage(err) {
+  return String(err?.message || err || 'unknown error').slice(0, 500)
+}
 
 async function login(force) {
   bot = new WeChatBot({
@@ -349,21 +361,35 @@ async function main() {
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 
-  try {
-    await login(force)
-    // IMPORTANT: the SDK's start() runs the long-poll loop and only resolves
-    // when the bot is stopped — run it in the background so the outbox
-    // consumer loop can run in parallel.
-    const startPromise = bot.start()
-    startPromise.catch((err) => console.error('[bridge] poll loop error:', err?.message || err))
-    outboxLoop()
-    console.log('[bridge] ready. Waiting for WeChat messages…')
-    // Keep the process alive until the bot is stopped (e.g. SIGTERM).
-    await startPromise
-  } catch (err) {
-    console.error('[bridge] fatal:', err?.message || err)
-    sendEvent('fatal', { message: String(err?.message || err).slice(0, 500) })
-    process.exit(1)
+  let failedAttempts = 0
+  while (!stopping) {
+    try {
+      // A QR status request can time out while the user is deciding whether to
+      // scan it. That is recoverable: keep this Node process alive and obtain
+      // a fresh QR in-process instead of exiting and making Desktop respawn us.
+      await login(force && failedAttempts === 0)
+      failedAttempts = 0
+      const activeBot = bot
+      const generation = ++connectionGeneration
+
+      // The SDK's start() runs the long-poll loop and only resolves when the
+      // bot stops. Run the DSH outbox consumer alongside that one connection.
+      void outboxLoop(activeBot, generation)
+      console.log('[bridge] ready. Waiting for WeChat messages…')
+      await activeBot.start()
+      if (!stopping) throw new Error('WeChat polling stopped unexpectedly')
+    } catch (err) {
+      connectionGeneration += 1
+      if (stopping) break
+      const message = errorMessage(err)
+      failedAttempts += 1
+      const delayMs = loginRetryDelay(failedAttempts)
+      console.error(`[bridge] login/session attempt failed: ${message}; retrying in ${Math.round(delayMs / 1000)}s`)
+      sendEvent('login-retry', { attempt: failedAttempts, delayMs, message })
+      try { bot?.stop() } catch {}
+      bot = undefined
+      await sleep(delayMs)
+    }
   }
 }
 
