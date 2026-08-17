@@ -59,6 +59,7 @@ const ALLOW_USERS = (process.env.WECHAT_ALLOW_USERS || '')
   .filter(Boolean)
 const BOT_AGENT = process.env.WECHAT_BOT_AGENT || 'DSH-WeChat-Bridge/0.1'
 const PRINT_ASCII_QR = process.env.WECHAT_PRINT_ASCII_QR === '1'
+const LOGIN_TIMEOUT_EXIT_CODE = 75
 // Media download directory — must live INSIDE the DSH workspace so the agent
 // (sandboxed to workspace-write) can read the files via read_image / read.
 const MEDIA_DIR = process.env.WECHAT_MEDIA_DIR
@@ -317,6 +318,10 @@ function errorMessage(err) {
   return String(err?.message || err || 'unknown error').slice(0, 500)
 }
 
+function isLoginTimeout(message) {
+  return /\btimeout\b|timed out|aborted due to timeout/i.test(message)
+}
+
 async function login(force) {
   bot = new WeChatBot({
     storageDir: STORAGE_DIR,
@@ -358,15 +363,12 @@ async function main() {
   sendEvent('bridge-start', { pid: process.pid })
   setInterval(() => sendEvent('heartbeat', { pid: process.pid }), 20000)
 
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', () => shutdown())
+  process.on('SIGTERM', () => shutdown())
 
   let failedAttempts = 0
   while (!stopping) {
     try {
-      // A QR status request can time out while the user is deciding whether to
-      // scan it. That is recoverable: keep this Node process alive and obtain
-      // a fresh QR in-process instead of exiting and making Desktop respawn us.
       await login(force && failedAttempts === 0)
       failedAttempts = 0
       const activeBot = bot
@@ -382,6 +384,14 @@ async function main() {
       connectionGeneration += 1
       if (stopping) break
       const message = errorMessage(err)
+      if (isLoginTimeout(message)) {
+        console.error('[bridge] login request timed out; stopping until Desktop explicitly requests a new QR')
+        sendEvent('login-timeout', { message })
+        try { bot?.stop() } catch {}
+        bot = undefined
+        await shutdown(LOGIN_TIMEOUT_EXIT_CODE)
+        break
+      }
       failedAttempts += 1
       const delayMs = loginRetryDelay(failedAttempts)
       console.error(`[bridge] login/session attempt failed: ${message}; retrying in ${Math.round(delayMs / 1000)}s`)
@@ -393,7 +403,7 @@ async function main() {
   }
 }
 
-async function shutdown() {
+async function shutdown(exitCode = 0) {
   if (stopping) return
   stopping = true
   console.log('[bridge] shutting down…')
@@ -403,7 +413,7 @@ async function shutdown() {
     /* ignore */
   }
   sendEvent('bridge-stop')
-  setTimeout(() => process.exit(0), 500)
+  setTimeout(() => process.exit(exitCode), 500)
 }
 
 main()

@@ -1,22 +1,39 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const source = readFileSync(new URL('../bridge/bridge.js', import.meta.url), 'utf8')
+const root = new URL('../', import.meta.url)
+const source = readFileSync(new URL('bridge/bridge.js', root), 'utf8')
+const host = readFileSync(new URL('index.js', root), 'utf8')
 
-assert.doesNotMatch(
+assert.match(
   source,
-  /process\.exit\(1\)/,
-  'An unattended QR-login timeout must not terminate the bridge process and trigger a new Node process.',
+  /const LOGIN_TIMEOUT_EXIT_CODE = 75/,
+  'A QR-login timeout needs a stable, host-recognizable exit code.',
 )
 assert.match(
   source,
-  /while\s*\(\s*!stopping\s*\)[\s\S]*?await\s+login\(/,
-  'The bridge must retry QR login within the same process while it is running.',
+  /sendEvent\('login-timeout'/,
+  'The bridge must tell Desktop that it stopped because login timed out.',
 )
 assert.match(
   source,
-  /sendEvent\('login-retry'/,
-  'Desktop must receive a status update when the bridge retries a login.',
+  /shutdown\(LOGIN_TIMEOUT_EXIT_CODE\)/,
+  'A QR-login timeout must stop the child process instead of sleeping and retrying.',
+)
+assert.match(
+  host,
+  /const LOGIN_TIMEOUT_EXIT_CODE = 75/,
+  'The host must recognize the controlled timeout exit.',
+)
+assert.match(
+  host,
+  /outcome\.exitCode === LOGIN_TIMEOUT_EXIT_CODE/,
+  'The host must not respawn a bridge that stopped after a QR-login timeout.',
+)
+assert.match(
+  host,
+  /restartBridge[\s\S]*?suppressRestartOnExit = false/,
+  'Only an explicit QR refresh may enable bridge startup again.',
 )
 
-console.log('bridge login retry contract: PASS')
+console.log('bridge login timeout shutdown contract: PASS')

@@ -34,9 +34,10 @@ import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 
 const PACKAGE_DIR = fileURLToPath(new URL('.', import.meta.url))
+const LOGIN_TIMEOUT_EXIT_CODE = 75
 
 export default {
-  inject: ['webServer', 'agents', 'timer'],
+  inject: ['webServer', 'agents', 'timer', 'workspaceRegistry', 'sessionQuery'],
   async apply(ctx, config) {
     let cfg = config || {}
     // GUI configuration page: this namespace is rendered by the Web Settings
@@ -112,11 +113,13 @@ export default {
     let bridgeRestartNonce = 0
     let restartAfterStart = false
     let stopping = false
+    let suppressRestartOnExit = false
 
     // ---------------- WeChat workspace (GUI grouping) -----------------------
-    const wsReg = ctx.get('workspaceRegistry')
+    const getWorkspaceRegistry = () => ctx.get('workspaceRegistry')
     let wechatWs = null
     const ensureWechatWorkspace = async () => {
+      const wsReg = getWorkspaceRegistry()
       if (!wsReg) return null
       try {
         const existing = wsReg.list().find((w) => w.path === WECHAT_WS_PATH)
@@ -521,6 +524,16 @@ export default {
         state.phase = 'waiting-qr'
         state.nextRetryMs = Number.isFinite(delayMs) && delayMs > 0 ? delayMs : null
         state.detail = '微信登录请求超时，bridge 保持运行并将在短暂等待后刷新二维码'
+      } else if (t === 'login-timeout') {
+        suppressRestartOnExit = true
+        state.bridgeAlive = false
+        state.bridgePid = null
+        state.phase = 'idle'
+        state.qrState = 'expired'
+        state.qrImage = null
+        state.qrUrl = null
+        state.nextRetryMs = null
+        state.detail = '微信登录请求超时，bridge 已停止。点击“重新获取二维码”后才会重新启动。'
       } else if (t === 'bridge-stop') {
         state.bridgeAlive = false
         state.detail = 'bridge 已停止'
@@ -651,6 +664,7 @@ export default {
       }
     }
     const findWorkspace = (workspaceId) => {
+      const wsReg = getWorkspaceRegistry()
       if (!wsReg || !workspaceId) return null
       if (typeof wsReg.get === 'function') return wsReg.get(workspaceId) || null
       return wsReg.list().find((workspace) => workspace.id === workspaceId) || null
@@ -664,12 +678,14 @@ export default {
       if (!workspace.sessionIds.includes(target.sessionId)) {
         return { kind: 'invalid', error: '已选择的 DSH 对话不属于该工作区，请在设置页重新选择。' }
       }
-      if (wsReg.archivedSessionIds && wsReg.archivedSessionIds.includes(target.sessionId)) {
+      const wsReg = getWorkspaceRegistry()
+      if (wsReg?.archivedSessionIds && wsReg.archivedSessionIds.includes(target.sessionId)) {
         return { kind: 'invalid', error: '已选择的 DSH 对话已归档，不能接收微信消息。' }
       }
       return { kind: 'selected', workspace, sessionId: target.sessionId }
     }
     const listTargetWorkspaces = async () => {
+      const wsReg = getWorkspaceRegistry()
       if (!wsReg) return { workspaces: [], target: targetSnapshot(), unavailable: 'DSH 工作区服务不可用。' }
       const archived = new Set(wsReg.archivedSessionIds || [])
       return {
@@ -684,6 +700,8 @@ export default {
     }
     const listTargetSessions = async (rawWorkspaceId) => {
       const workspaceId = asTargetId(rawWorkspaceId)
+      const wsReg = getWorkspaceRegistry()
+      if (!wsReg) throw new Error('DSH 工作区服务不可用。')
       const workspace = findWorkspace(workspaceId)
       if (!workspace) throw new Error('工作区不存在或已被移除。')
       const q = ctx.get('sessionQuery')
@@ -725,12 +743,13 @@ export default {
     const saveTargetSelection = async (rawWorkspaceId, rawSessionId) => {
       const workspaceId = asTargetId(rawWorkspaceId)
       const sessionId = asTargetId(rawSessionId)
+      const wsReg = getWorkspaceRegistry()
       if (sessionId && !workspaceId) throw new Error('请先选择目标工作区。')
       if (workspaceId && !findWorkspace(workspaceId)) throw new Error('目标工作区不存在或已被移除。')
       if (sessionId) {
         const workspace = findWorkspace(workspaceId)
         if (!workspace || !workspace.sessionIds.includes(sessionId)) throw new Error('目标对话不属于所选工作区。')
-        if (wsReg.archivedSessionIds && wsReg.archivedSessionIds.includes(sessionId)) throw new Error('已归档对话不能作为微信目标。')
+        if (wsReg?.archivedSessionIds && wsReg.archivedSessionIds.includes(sessionId)) throw new Error('已归档对话不能作为微信目标。')
         if (agentsSvc.get(sessionId)) throw new Error('目标对话正在运行。请等待它完成后再绑定，微信桥接不会打断正在执行的任务。')
       }
       if (!settingsSvc) throw new Error('DSH 设置服务不可用，无法保存转发目标。')
@@ -1041,6 +1060,13 @@ export default {
           state.pairingRequired = false
           state.lastExit = { exitCode: outcome.exitCode, signal: outcome.signal }
           console.log('[wechat] bridge exited:', JSON.stringify(outcome))
+          if (outcome.exitCode === LOGIN_TIMEOUT_EXIT_CODE || suppressRestartOnExit) {
+            state.phase = 'idle'
+            state.qrState = 'expired'
+            state.nextRetryMs = null
+            state.detail = '微信登录请求超时，bridge 已停止。点击“重新获取二维码”后才会重新启动。'
+            return
+          }
           if (!stopping) {
             state.retryAttempt += 1
             const delayMs = Math.min(30000, 3000 * (2 ** Math.min(state.retryAttempt - 1, 3)))
@@ -1070,6 +1096,7 @@ export default {
 
     const restartBridge = () => {
       bridgeRestartNonce += 1
+      suppressRestartOnExit = false
       state.retryAttempt = 0
       state.nextRetryMs = 800
       state.pairingRequired = false
