@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 const root = new URL('../', import.meta.url)
 const source = readFileSync(new URL('bridge/bridge.js', root), 'utf8')
 const host = readFileSync(new URL('index.js', root), 'utf8')
+const client = readFileSync(new URL('client.js', root), 'utf8')
 
 assert.match(
   source,
@@ -34,6 +35,11 @@ assert.match(
   host,
   /restartBridge[\s\S]*?suppressRestartOnExit = false/,
   'Only an explicit QR refresh may enable bridge startup again.',
+)
+assert.match(
+  client,
+  /snapshot\.phase === 'idle'\) return '已停止'/,
+  'The UI must label a timeout-stopped bridge as stopped instead of connecting.',
 )
 
 console.log('bridge login timeout shutdown contract: PASS')

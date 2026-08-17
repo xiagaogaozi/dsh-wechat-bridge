@@ -74,6 +74,7 @@ window.__ModuleLoader__.load({
       if (snapshot.phase === 'scanned') return '等待手机确认'
       if (snapshot.phase === 'error') return '错误'
       if (snapshot.phase === 'expired') return '会话已过期'
+      if (snapshot.phase === 'idle') return '已停止'
       return '连接中'
     }
 
