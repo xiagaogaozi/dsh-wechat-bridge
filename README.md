@@ -18,6 +18,7 @@
 - 📜 **/history 查询**：微信内直接列出/查看任意历史轮次
 - 🖼️ **媒体支持**：图片/文件自动落盘并给出路径，agent 可读取处理
 - 🖥️ **Desktop 设置页**：设置 →「微信桥接」内直接扫码、查看状态、提交手机显示的配对码
+- 🎯 **可选转发目标**：在 Desktop 设置页选择已有 DSH 工作区及其一个空闲对话，让微信消息继续写入该对话
 - ⚙️ **网页配置页**：`http://127.0.0.1:3080/wxb/config` 仍可修改 host 配置
 - 🔌 **标准 DSH 插件包**：安装后同时挂载 host 与 Desktop/Web client，不改 DSH 内核
 
@@ -48,7 +49,7 @@ dsh plugin --profile web add github:xiagaogaozi/dsh-wechat-bridge
 ```bash
 cd /path/to/dsh-wechat-bridge
 npm pack
-dsh plugin --profile web add ./dsh-wechat-bridge-1.1.5.tgz
+dsh plugin --profile web add ./dsh-wechat-bridge-1.1.6.tgz
 ```
 
 不要再把 `index.js` 单独追加到 profile 的 `cordis.patch.yml`；那种旧安装方式只挂载 host，Desktop 无法发现 client 设置页。
@@ -56,6 +57,12 @@ dsh plugin --profile web add ./dsh-wechat-bridge-1.1.5.tgz
 ## Desktop 扫码与配对码
 
 在 DSH Desktop 的设置列表选择「微信桥接」。该页每 2.5 秒刷新状态，展示二维码、扫码/在线状态、bridge PID，以及微信要求时出现的配对码输入框。点击「重新获取二维码」会受控重启 bridge；bridge 不再继承 Electron 的控制台，因此不会创建可见 Node 黑窗。二维码、配对码提交接口仅接受本机 loopback 请求，远程 Web 页面不能读取或提交它们。
+
+### 选择工作区和对话
+
+同一设置页的「微信转发目标」先列出 DSH 工作区，再只列出所选工作区内未归档的对话。选定两者后，微信收到的普通消息会继续写入该对话；插件不会移动该对话、修改其工作区、预设或模型。为了避免打断现有工作，正在运行的对话不能绑定；若之后它正在运行，微信消息会明确提示未写入而不是排队、取消或新建替代会话。
+
+未选择目标对话时，插件保持原有行为：每个微信用户拥有独立的 WeChat 会话，`/new` 和 `/history` 仍然可用。已绑定到指定对话时，`/new` 和 `/history` 不会改动该对话，请在 DSH 对话列表中管理其历史。
 
 ## 配置页面
 

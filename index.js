@@ -53,6 +53,8 @@ export default {
           approvalPolicy: z.union([z.const('never'), z.const('ask')]),
           base: z.string(),
           workspaceTitle: z.string(),
+          targetWorkspaceId: z.string(),
+          targetSessionId: z.string(),
         }), {})
         const saved = settingsSvc.get('dsh-wechat-bridge')
         if (saved && typeof saved === 'object') cfg = { ...cfg, ...saved }
@@ -103,6 +105,8 @@ export default {
     const recentMsgs = new Map()
     const userGen = new Map()
     const routeDisposers = []
+    let selectedTarget = null
+    let selectedTargetCreating = null
     let bridgeProc = null
     let bridgeStarting = false
     let bridgeRestartNonce = 0
@@ -394,7 +398,16 @@ export default {
       const media = (m && m.media && m.media.path) ? m.media : null
 
       const trimmed = text.trim()
+      const targetState = selectedTargetState()
+      if (targetState.kind === 'invalid') {
+        pushOutbox(userId, targetState.error)
+        return
+      }
       if (!media && (trimmed === '/new' || trimmed === '/重置')) {
+        if (targetState.kind === 'selected') {
+          pushOutbox(userId, '当前微信已绑定到指定 DSH 对话，/new 不会新建或替换该对话。请在「微信桥接」设置中改选目标对话。')
+          return
+        }
         const old = userAgents.get(userId)
         if (old) {
           userAgents.delete(userId)
@@ -407,6 +420,10 @@ export default {
         return
       }
       if (!media && (trimmed === '/history' || trimmed === '/历史' || trimmed.startsWith('/history ') || trimmed.startsWith('/历史 '))) {
+        if (targetState.kind === 'selected') {
+          pushOutbox(userId, '当前微信已绑定到指定 DSH 对话，请直接在 DSH 对话列表中查看其历史记录。')
+          return
+        }
         const parts = trimmed.split(/\s+/)
         const arg = parts.length > 1 ? parts[1] : ''
         const reply = await handleHistory(userId, arg)
@@ -414,7 +431,9 @@ export default {
         return
       }
       if (!media && (trimmed === '/help' || trimmed === '/帮助')) {
-        pushOutbox(userId, '可用命令：\n/new - 开启新对话（旧对话保留）\n/history - 查看历史对话\n/history 数字 - 查看对应对话内容\n/help - 显示本帮助\n其他消息直接和我对话即可。')
+        pushOutbox(userId, targetState.kind === 'selected'
+          ? '当前消息会发送到已选定的 DSH 对话。\n在 DSH 的「微信桥接」设置页可修改工作区和目标对话。\n/help - 显示本帮助'
+          : '可用命令：\n/new - 开启新对话（旧对话保留）\n/history - 查看历史对话\n/history 数字 - 查看对应对话内容\n/help - 显示本帮助\n其他消息直接和我对话即可。')
         return
       }
 
@@ -431,6 +450,17 @@ export default {
       recentMsgs.set(key, Date.now())
       if (recentMsgs.size > 600) {
         for (const [k, t] of recentMsgs) if (Date.now() - t > 300000) recentMsgs.delete(k)
+      }
+      if (targetState.kind === 'selected') {
+        try {
+          const entry = await getSelectedTarget(targetState.sessionId)
+          entry.queue.push({ userId, text: fullText })
+          void driveSelectedTarget(entry)
+        } catch (err) {
+          console.error('[wechat] selected target unavailable:', err)
+          pushOutbox(userId, '目标对话不可用：' + String((err && err.message) || err).slice(0, 240))
+        }
+        return
       }
       let entry = userAgents.get(userId)
       if (!entry) {
@@ -530,6 +560,7 @@ export default {
       users: Array.from(userAgents.keys()),
       outboxDepth: outbox.length,
       since: state.since,
+      target: targetSnapshot(),
     })
 
     routeDisposers.push(ws.register({ kind: 'exact', path: BASE + '/inbound', handler: async (req, res) => {
@@ -601,6 +632,160 @@ export default {
         return { ok: false, error: '提交配对码失败：' + String((err && err.message) || err).slice(0, 200) }
       }
     }
+
+    // ---------------- optional selected DSH target ---------------------------
+    // By default every WeChat user gets a private bridge-owned session.  A
+    // user may instead opt into one existing, idle DSH session through the
+    // Desktop settings page.  We never attach/move that chosen session: its
+    // workspace ownership and its original agent setup stay untouched.
+    const asTargetId = (value) => String(value || '').trim().slice(0, 200)
+    const targetSelection = () => ({
+      workspaceId: asTargetId(cfg.targetWorkspaceId),
+      sessionId: asTargetId(cfg.targetSessionId),
+    })
+    const targetSnapshot = () => {
+      const target = targetSelection()
+      return {
+        ...target,
+        mode: target.sessionId ? 'selected-session' : 'per-user-session',
+      }
+    }
+    const findWorkspace = (workspaceId) => {
+      if (!wsReg || !workspaceId) return null
+      if (typeof wsReg.get === 'function') return wsReg.get(workspaceId) || null
+      return wsReg.list().find((workspace) => workspace.id === workspaceId) || null
+    }
+    const selectedTargetState = () => {
+      const target = targetSelection()
+      if (!target.sessionId) return { kind: 'default' }
+      if (!target.workspaceId) return { kind: 'invalid', error: '微信桥接的目标工作区未设置，请在设置页重新选择。' }
+      const workspace = findWorkspace(target.workspaceId)
+      if (!workspace) return { kind: 'invalid', error: '已选择的 DSH 工作区不存在，请在设置页重新选择。' }
+      if (!workspace.sessionIds.includes(target.sessionId)) {
+        return { kind: 'invalid', error: '已选择的 DSH 对话不属于该工作区，请在设置页重新选择。' }
+      }
+      if (wsReg.archivedSessionIds && wsReg.archivedSessionIds.includes(target.sessionId)) {
+        return { kind: 'invalid', error: '已选择的 DSH 对话已归档，不能接收微信消息。' }
+      }
+      return { kind: 'selected', workspace, sessionId: target.sessionId }
+    }
+    const listTargetWorkspaces = async () => {
+      if (!wsReg) return { workspaces: [], target: targetSnapshot(), unavailable: 'DSH 工作区服务不可用。' }
+      const archived = new Set(wsReg.archivedSessionIds || [])
+      return {
+        workspaces: wsReg.list().map((workspace) => ({
+          id: workspace.id,
+          title: workspace.title,
+          path: workspace.path,
+          sessionCount: workspace.sessionIds.filter((id) => !archived.has(id)).length,
+        })),
+        target: targetSnapshot(),
+      }
+    }
+    const listTargetSessions = async (rawWorkspaceId) => {
+      const workspaceId = asTargetId(rawWorkspaceId)
+      const workspace = findWorkspace(workspaceId)
+      if (!workspace) throw new Error('工作区不存在或已被移除。')
+      const q = ctx.get('sessionQuery')
+      if (!q) throw new Error('DSH 会话查询服务不可用。')
+      const archived = new Set(wsReg.archivedSessionIds || [])
+      const records = await q.listSessions()
+      const byId = new Map(records.map((record) => [record.header.id, record]))
+      const sessions = await Promise.all(workspace.sessionIds
+        .filter((id) => !archived.has(id))
+        .map(async (id) => {
+          const record = byId.get(id)
+          let title = ''
+          try {
+            const titleSnapshot = await q.readTitle(id)
+            title = titleSnapshot && titleSnapshot.title ? String(titleSnapshot.title) : ''
+          } catch (e) {}
+          const live = agentsSvc.get(id)
+          return {
+            id,
+            title,
+            createdAt: record && record.header ? record.header.createdAt : 0,
+            running: Boolean(live && (!selectedTarget || selectedTarget.sessionId !== id)),
+          }
+        }))
+      return { workspaceId, sessions, target: targetSnapshot() }
+    }
+    const disposeSelectedTarget = (entry) => {
+      if (!entry || entry.disposed) return
+      entry.disposed = true
+      entry.handle.dispose().catch((e) => console.error('[wechat] selected target dispose failed:', e))
+    }
+    const retireSelectedTarget = () => {
+      const entry = selectedTarget
+      selectedTarget = null
+      if (!entry) return
+      entry.retired = true
+      if (!entry.busy) disposeSelectedTarget(entry)
+    }
+    const saveTargetSelection = async (rawWorkspaceId, rawSessionId) => {
+      const workspaceId = asTargetId(rawWorkspaceId)
+      const sessionId = asTargetId(rawSessionId)
+      if (sessionId && !workspaceId) throw new Error('请先选择目标工作区。')
+      if (workspaceId && !findWorkspace(workspaceId)) throw new Error('目标工作区不存在或已被移除。')
+      if (sessionId) {
+        const workspace = findWorkspace(workspaceId)
+        if (!workspace || !workspace.sessionIds.includes(sessionId)) throw new Error('目标对话不属于所选工作区。')
+        if (wsReg.archivedSessionIds && wsReg.archivedSessionIds.includes(sessionId)) throw new Error('已归档对话不能作为微信目标。')
+        if (agentsSvc.get(sessionId)) throw new Error('目标对话正在运行。请等待它完成后再绑定，微信桥接不会打断正在执行的任务。')
+      }
+      if (!settingsSvc) throw new Error('DSH 设置服务不可用，无法保存转发目标。')
+      await settingsSvc.update('dsh-wechat-bridge', { targetWorkspaceId: workspaceId, targetSessionId: sessionId })
+      cfg = { ...cfg, targetWorkspaceId: workspaceId, targetSessionId: sessionId }
+      retireSelectedTarget()
+      return targetSnapshot()
+    }
+    const driveSelectedTarget = async (entry) => {
+      if (entry.busy) return
+      entry.busy = true
+      try {
+        while (entry.queue.length) {
+          const message = entry.queue.shift()
+          try {
+            const agent = entry.handle.agent
+            const beforeSeq = agent.session.seq
+            agent.followup(makeUserMessage(message.text))
+            await agent.whenIdle()
+            const text = extractAssistantText(agent.session.events.slice(beforeSeq))
+            pushOutbox(message.userId, text ? text : '（已完成，没有生成文本输出）')
+          } catch (err) {
+            pushOutbox(message.userId, '抱歉，处理你的消息时出错了：' + String((err && err.message) || err).slice(0, 300))
+          }
+        }
+      } finally {
+        entry.busy = false
+        if (entry.retired) disposeSelectedTarget(entry)
+      }
+    }
+    const getSelectedTarget = async (sessionId) => {
+      if (selectedTarget && selectedTarget.sessionId === sessionId && !selectedTarget.disposed) return selectedTarget
+      if (selectedTargetCreating) return selectedTargetCreating
+      const creatingTarget = (async () => {
+        const live = agentsSvc.get(sessionId)
+        if (live) throw new Error('目标对话正在运行，微信消息没有写入。请等待当前任务结束后再发送。')
+        // Resume without a preset/model override: this is the user's existing
+        // conversation, so its saved agent setup remains authoritative.
+        const handle = await agentsSvc.resume({ resumeSessionId: sessionId })
+        const entry = { sessionId, handle, queue: [], busy: false, retired: false, disposed: false }
+        if (targetSelection().sessionId !== sessionId) {
+          entry.retired = true
+          disposeSelectedTarget(entry)
+          throw new Error('转发目标已变更，请重新发送消息。')
+        }
+        selectedTarget = entry
+        return entry
+      })()
+      selectedTargetCreating = creatingTarget
+      try {
+        return await creatingTarget
+      } finally {
+        if (selectedTargetCreating === creatingTarget) selectedTargetCreating = null
+      }
+    }
     routeDisposers.push(ws.register({ kind: 'exact', path: '/plugins/dsh-wechat-bridge/desktop', handler: async (req, res) => {
       if (!isLoopbackRequest(req)) return sendJson(res, 403, { error: 'Desktop pairing controls are available only from this computer' })
       if (req.method === 'GET') return sendJson(res, 200, desktopSnapshot())
@@ -610,6 +795,28 @@ export default {
       }
       const body = await readBody(req)
       const action = String(body && body.action || '')
+      if (action === 'list-targets') {
+        try {
+          return sendJson(res, 200, { ok: true, ...(await listTargetWorkspaces()) })
+        } catch (err) {
+          return sendJson(res, 500, { ok: false, error: '读取工作区失败：' + String((err && err.message) || err).slice(0, 200) })
+        }
+      }
+      if (action === 'list-target-sessions') {
+        try {
+          return sendJson(res, 200, { ok: true, ...(await listTargetSessions(body && body.workspaceId)) })
+        } catch (err) {
+          return sendJson(res, 400, { ok: false, error: '读取对话失败：' + String((err && err.message) || err).slice(0, 200) })
+        }
+      }
+      if (action === 'save-target') {
+        try {
+          const target = await saveTargetSelection(body && body.workspaceId, body && body.sessionId)
+          return sendJson(res, 200, { ok: true, target, snapshot: desktopSnapshot() })
+        } catch (err) {
+          return sendJson(res, 400, { ok: false, error: '保存转发目标失败：' + String((err && err.message) || err).slice(0, 200), target: targetSnapshot() })
+        }
+      }
       if (action === 'restart-bridge') {
         restartBridge()
         return sendJson(res, 200, { ok: true, snapshot: desktopSnapshot() })
@@ -909,6 +1116,11 @@ export default {
         entry.handle.dispose().catch(() => {})
       }
       retiredHandles.clear()
+      if (selectedTarget) {
+        selectedTarget.retired = true
+        disposeSelectedTarget(selectedTarget)
+        selectedTarget = null
+      }
     })
 
     // Optional panel RPCs — only present in the dynamic-plugin runtime.

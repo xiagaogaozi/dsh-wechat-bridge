@@ -35,6 +35,11 @@ window.__ModuleLoader__.load({
       [data-dsh-wechat-bridge-settings] .wxb-qr { width: min(240px, 100%); aspect-ratio: 1; box-sizing: border-box; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-static-neutral-00); image-rendering: pixelated; }
       [data-dsh-wechat-bridge-settings] .wxb-pair-row { display: flex; width: min(360px, 100%); align-items: center; gap: 8px; }
       [data-dsh-wechat-bridge-settings] .wxb-pair-row > span { flex: 1; min-width: 0; }
+      [data-dsh-wechat-bridge-settings] .wxb-target-fields { display: flex; width: min(560px, 100%); flex-direction: column; gap: 12px; }
+      [data-dsh-wechat-bridge-settings] .wxb-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+      [data-dsh-wechat-bridge-settings] .wxb-field-label { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 20px; }
+      [data-dsh-wechat-bridge-settings] .wxb-select { width: 100%; min-height: 32px; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; line-height: 20px; padding: 5px 8px; }
+      [data-dsh-wechat-bridge-settings] .wxb-select:disabled { color: var(--dsw-alias-label-tertiary); }
       [data-dsh-wechat-bridge-settings] .wxb-empty { color: var(--dsw-alias-label-tertiary); font-size: 13px; line-height: 20px; }
       [data-dsh-wechat-bridge-settings] .wxb-error { display: flex; align-items: flex-start; gap: 8px; color: var(--dsw-alias-state-error-primary); font-size: 13px; line-height: 20px; }
       [data-dsh-wechat-bridge-settings] .wxb-meta { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
@@ -83,15 +88,81 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState(null)
       const [pairingCode, setPairingCode] = useState('')
       const [busy, setBusy] = useState(false)
+      const [target, setTarget] = useState({ workspaceId: '', sessionId: '', mode: 'per-user-session' })
+      const [workspaces, setWorkspaces] = useState([])
+      const [sessions, setSessions] = useState([])
+      const [targetBusy, setTargetBusy] = useState(false)
       const refresh = useCallback(async () => {
         try {
           const data = await request('GET')
           setSnapshot(data)
+          if (data.target) setTarget(data.target)
           setError(null)
         } catch (err) {
           setError(`无法读取微信桥接状态：${err instanceof Error ? err.message : String(err)}`)
         }
       }, [])
+
+      const loadTargetSessions = useCallback(async (workspaceId) => {
+        if (!workspaceId) {
+          setSessions([])
+          return
+        }
+        try {
+          const data = await request('POST', { action: 'list-target-sessions', workspaceId })
+          setSessions(data.sessions || [])
+          if (data.target) setTarget(data.target)
+        } catch (err) {
+          setSessions([])
+          setError(`无法读取工作区对话：${err instanceof Error ? err.message : String(err)}`)
+        }
+      }, [])
+
+      const loadTargets = useCallback(async () => {
+        try {
+          const data = await request('POST', { action: 'list-targets' })
+          setWorkspaces(data.workspaces || [])
+          if (data.target) setTarget(data.target)
+          if (data.unavailable) setError(data.unavailable)
+        } catch (err) {
+          setError(`无法读取 DSH 工作区：${err instanceof Error ? err.message : String(err)}`)
+        }
+      }, [])
+
+      const saveTarget = async (next, previous) => {
+        setTargetBusy(true)
+        try {
+          const data = await request('POST', {
+            action: 'save-target',
+            workspaceId: next.workspaceId,
+            sessionId: next.sessionId,
+          })
+          setTarget(data.target || next)
+          if (data.snapshot) setSnapshot(data.snapshot)
+          setError(null)
+        } catch (err) {
+          setTarget(previous)
+          setError(`保存微信转发目标失败：${err instanceof Error ? err.message : String(err)}`)
+        } finally {
+          setTargetBusy(false)
+        }
+      }
+
+      const chooseWorkspace = (workspaceId) => {
+        const previous = target
+        const next = { workspaceId, sessionId: '', mode: workspaceId ? 'per-user-session' : 'per-user-session' }
+        setTarget(next)
+        setSessions([])
+        void saveTarget(next, previous)
+        if (workspaceId) void loadTargetSessions(workspaceId)
+      }
+
+      const chooseSession = (sessionId) => {
+        const previous = target
+        const next = { workspaceId: target.workspaceId, sessionId, mode: sessionId ? 'selected-session' : 'per-user-session' }
+        setTarget(next)
+        void saveTarget(next, previous)
+      }
 
       useEffect(() => {
         installStyles()
@@ -101,15 +172,21 @@ window.__ModuleLoader__.load({
             const data = await request('GET')
             if (!active) return
             setSnapshot(data)
+            if (data.target) setTarget(data.target)
             setError(null)
           } catch (err) {
             if (active) setError(`无法读取微信桥接状态：${err instanceof Error ? err.message : String(err)}`)
           }
         }
         void load()
+        void loadTargets()
         const timer = window.setInterval(() => { void load() }, 2500)
         return () => { active = false; window.clearInterval(timer) }
-      }, [])
+      }, [loadTargets])
+
+      useEffect(() => {
+        if (target.workspaceId) void loadTargetSessions(target.workspaceId)
+      }, [loadTargetSessions, target.workspaceId])
 
       const restart = async () => {
         setBusy(true)
@@ -170,10 +247,51 @@ window.__ModuleLoader__.load({
           snapshot.qrImage
             ? h('img', { className: 'wxb-qr', src: snapshot.qrImage, alt: '微信登录二维码' })
             : h('div', { className: 'wxb-empty' }, '暂无二维码'),
+           h(Button, {
+             variant: 'outline', size: 'sm', disabled: busy, icon: h(IconRefreshOutline16, null),
+             onClick: () => { void restart() },
+           }, '重新获取二维码')),
+        h('div', { className: 'wxb-card' },
+          h('h3', null, '微信转发目标'),
+          h('p', null, '选择一个 DSH 工作区及其中的对话后，微信消息会继续写入该对话。未选择对话时，仍按原有方式为每个微信用户创建独立会话。运行中或已归档的对话不能绑定，以免打断任务。'),
+          h('div', { className: 'wxb-target-fields' },
+            h('label', { className: 'wxb-field' },
+              h('span', { className: 'wxb-field-label' }, '工作区'),
+              h('select', {
+                className: 'wxb-select',
+                value: target.workspaceId || '',
+                disabled: targetBusy,
+                'aria-label': '微信转发目标工作区',
+                onChange: (event) => chooseWorkspace(event.target.value),
+              }, [
+                h('option', { key: 'default', value: '' }, '不指定工作区（独立 WeChat 会话）'),
+                ...workspaces.map((workspace) => h('option', { key: workspace.id, value: workspace.id }, `${workspace.title || workspace.path} · ${workspace.sessionCount || 0} 个对话`)),
+              ])),
+            target.workspaceId
+              ? h('label', { className: 'wxb-field' },
+                h('span', { className: 'wxb-field-label' }, '对话'),
+                h('select', {
+                  className: 'wxb-select',
+                  value: target.sessionId || '',
+                  disabled: targetBusy,
+                  'aria-label': '微信转发目标对话',
+                  onChange: (event) => chooseSession(event.target.value),
+                }, [
+                  h('option', { key: 'default', value: '' }, '不指定对话（保持独立 WeChat 会话）'),
+                  ...sessions.map((session) => h('option', {
+                    key: session.id,
+                    value: session.id,
+                    disabled: Boolean(session.running && session.id !== target.sessionId),
+                  }, `${session.title || '未命名对话'}${session.running ? '（运行中，不能绑定）' : ''}`)),
+                ]))
+              : null,
+            target.workspaceId && sessions.length === 0
+              ? h('div', { className: 'wxb-empty' }, '该工作区暂时没有可选择的未归档对话。')
+              : null),
           h(Button, {
-            variant: 'outline', size: 'sm', disabled: busy, icon: h(IconRefreshOutline16, null),
-            onClick: () => { void restart() },
-          }, '重新获取二维码')),
+            variant: 'outline', size: 'sm', disabled: targetBusy, icon: h(IconRefreshOutline16, null),
+            onClick: () => { void loadTargets(); if (target.workspaceId) void loadTargetSessions(target.workspaceId) },
+          }, '刷新工作区和对话列表')),
         snapshot.pairingRequired ? h('div', { className: 'wxb-card' },
           h('h3', null, '输入配对码'),
           h('p', null, '手机微信显示配对码时，在此输入并提交；代码不会保存。'),
