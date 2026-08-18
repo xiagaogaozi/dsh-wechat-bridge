@@ -291,7 +291,14 @@ export function createMobileRemoteGateway({
         const rewritten = rewriteBootManifest(body.toString('utf8'), blockedClients)
         const headers = { ...upstreamResponse.headers }
         delete headers['transfer-encoding']
+        // The boot manifest contains revisioned client URLs and is rewritten
+        // per gateway request. Never let a phone reuse an older shell after a
+        // plugin update or a Desktop/Web profile switch.
+        delete headers.etag
+        delete headers['last-modified']
         headers['content-length'] = String(Buffer.byteLength(rewritten))
+        headers['cache-control'] = 'no-store'
+        headers.pragma = 'no-cache'
         res.writeHead(upstreamResponse.statusCode || 502, headers)
         res.end(rewritten)
       } catch (error) {

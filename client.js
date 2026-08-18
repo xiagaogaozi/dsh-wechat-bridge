@@ -913,9 +913,13 @@ exports.BASE_CSS = `
    The top clears the camera band below the status bar; when the client has
    set viewport-fit=cover the safe-area inset moves it below the notch too. */
 [data-mobile-nav="fab"] {
-  position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 72px);
-  left: 10px;
+  /* The overlay is rendered below AppFrame. Fixed positioning keeps the
+     fallback opener tied to the phone viewport instead of an intermediate
+     grid/content containing block. */
+  position: fixed !important;
+  top: calc(env(safe-area-inset-top, 0px) + 72px) !important;
+  left: 10px !important;
+  inset-inline-start: 10px !important;
   z-index: 21;
   display: inline-flex;
   align-items: center;
@@ -1138,6 +1142,53 @@ exports.LAYOUT_CSS = `/* ---------- mobile-only layout ---------- */
     box-sizing: border-box !important;
     width: fit-content !important;
     max-width: 100% !important;
+  }
+
+  /* --- Composer controls: keep the mobile action row explicit ---
+     Some DSH shells render the row as a content-sized flex group. On a phone
+     that puts the send button beside the plus button and lets the permission
+     trigger collapse or disappear. The row is the stable boundary: tools
+     stay on the left, the permission trigger stays beside the plus, and the
+     model/send group is pushed to the lower-right edge. */
+  [data-phase] [class*="_card"]:has(textarea) {
+    position: relative !important;
+  }
+  [data-phase] [class*="_card"]:has(textarea) [class$="_row"]:has([class$="_trailing"]) {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+  }
+  [data-phase] [class*="_card"]:has(textarea) [class$="_tools"] {
+    display: flex !important;
+    align-items: center !important;
+    flex: 0 1 auto !important;
+    min-width: 0 !important;
+  }
+  [data-phase] [class*="_card"]:has(textarea) [class$="_modes"],
+  [data-phase] [class*="_card"]:has(textarea) [data-slot="conversation.input.plan"] {
+    display: flex !important;
+    align-items: center !important;
+    flex: 0 0 auto !important;
+    min-width: max-content !important;
+  }
+  [data-phase] [class*="_card"]:has(textarea) [class$="_modes"] [aria-label*="访问模式"] {
+    display: inline-flex !important;
+    visibility: visible !important;
+    flex: 0 0 auto !important;
+    min-width: max-content !important;
+  }
+  [data-phase] [class*="_card"]:has(textarea) [class$="_trailing"] {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    flex: 0 1 auto !important;
+    min-width: 0 !important;
+    margin-left: auto !important;
+  }
+  [data-phase] [class*="_card"]:has(textarea) [class$="_primary"][aria-label="发送消息"] {
+    flex: 0 0 auto !important;
+    margin-left: 8px !important;
   }
 
   /* --- Composer bottom row on mobile ---

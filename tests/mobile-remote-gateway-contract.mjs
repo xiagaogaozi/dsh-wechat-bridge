@@ -142,6 +142,9 @@ try {
   assert.equal(home.status, 200)
   assert.doesNotMatch(home.body, /dsh-plugin-desktop/)
   const boot = JSON.parse(home.body.match(/window\.__DSH_BOOT__ = (.+?)<\/script>/s)[1])
+  assert.equal(home.headers['cache-control'], 'no-store')
+  assert.equal(home.headers.pragma, 'no-cache')
+  assert.equal(home.headers.etag, undefined)
   assert.deepEqual(boot.entries, [{
     id: 'dshmarket',
     url: '/plugins/dshmarket/client.js?rev=market',
@@ -155,6 +158,14 @@ try {
     host: `127.0.0.1:${upstreamPort}`,
     origin: `http://127.0.0.1:${upstreamPort}`,
   })
+  const workspaces = await call({
+    port: gatewayPort,
+    path: '/api/workspace.list',
+    method: 'POST',
+    headers: { ...authorizedHeaders, 'content-type': 'application/json', 'content-length': 0 },
+  })
+  assert.equal(workspaces.status, 200)
+  assert.equal(JSON.parse(workspaces.body).path, '/api/workspace.list')
   assert.equal((await call({ port: gatewayPort, path: '/reader', headers: authorizedHeaders })).status, 200)
   assert.equal((await call({ port: gatewayPort, path: '/wxb/config', headers: authorizedHeaders })).status, 403)
   assert.equal((await call({ port: gatewayPort, path: '/api/settings.update', headers: authorizedHeaders })).status, 403)
