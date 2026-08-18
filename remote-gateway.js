@@ -184,7 +184,7 @@ const rewriteBootManifest = (html, blockedClientIds) => {
 export function createMobileRemoteGateway({
   getTargetPort,
   getLanAddress,
-  port = 3080,
+  port = 3082,
   blockedPrefixes = ['/wxb'],
   blockedClientIds = DEFAULT_BLOCKED_CLIENT_IDS,
   logger = console,
@@ -471,7 +471,7 @@ export function createMobileRemoteGateway({
     }
     sockets.clear()
     phase = 'stopped'
-    detail = '移动端远程已停止，3080 端口已释放。'
+    detail = '移动端远程已停止，3082 端口已释放。'
     return snapshot()
   }
 

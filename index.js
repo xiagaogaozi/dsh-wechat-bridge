@@ -36,6 +36,7 @@ import z from '@deepseek-ai/schemastery'
 import { createMobileRemoteGateway } from './remote-gateway.js'
 
 const PACKAGE_DIR = fileURLToPath(new URL('.', import.meta.url))
+const MOBILE_REMOTE_PORT = 3082
 const LOGIN_TIMEOUT_EXIT_CODE = 75
 
 const privateIpv4Rank = (address) => {
@@ -103,7 +104,7 @@ export default {
     const mobileRemote = createMobileRemoteGateway({
       getTargetPort: () => ws.port,
       getLanAddress: preferredLanAddress,
-      port: 3080,
+      port: MOBILE_REMOTE_PORT,
       blockedPrefixes: [BASE],
       logger: console,
     })

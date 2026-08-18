@@ -377,7 +377,7 @@ window.__ModuleLoader__.load({
       }
 
       const remote = snapshot.mobileRemote || {}
-      const lanUrl = remote.lanUrl || 'http://本机局域网IP:3080'
+      const lanUrl = remote.lanUrl || 'http://本机局域网IP:3082'
       const readerUrl = remote.readerUrl || `${lanUrl}/reader`
       const running = Boolean(remote.enabled)
       const statusLabel = running ? '运行中' : remote.phase === 'error' ? '启动失败' : remote.phase === 'starting' ? '正在启动' : '已停止'
@@ -437,7 +437,7 @@ window.__ModuleLoader__.load({
             h(IconWarningOutline16, { size: 16 }),
             h('span', null, running
               ? 'DSH 与 Desktop 仍保持 127.0.0.1；插件网关只向已配对设备转发，并阻止微信二维码、设置、凭据和本机路径接口。'
-              : '启动后插件将监听 0.0.0.0:3080；DSH 与 Desktop 自身仍保持 127.0.0.1。'))))
+              : '启动后插件将监听 0.0.0.0:3082；DSH 与 Desktop 自身仍保持 127.0.0.1。'))))
     }
 
     function RemoteControlSettings() {

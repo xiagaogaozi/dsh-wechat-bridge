@@ -19,11 +19,10 @@
 - 🖼️ **媒体支持**：图片/文件自动落盘并给出路径，agent 可读取处理
 - 🖥️ **Desktop 设置页**：设置列表只注册「远程控制」，页面内切换「微信桥接」和「移动端远程」
 - 🎯 **可选转发目标**：在 Desktop 设置页选择已有 DSH 工作区及其一个空闲对话，让微信消息继续写入该对话
-- 🌐 **配对后局域网访问**：插件独立监听 `0.0.0.0:3080`，不修改 DSH 或 Desktop 的回环监听
-- 📱 **手机竖屏 UI**：内置迁移自 `mexiaosqwq/dsh-web-mobile` 1.0.0 的目录抽屉、会话头部、设置 sheet、文件/预览浮层和响应式排版
+- 🌐 **配对后局域网访问**：插件独立监听 `0.0.0.0:3082`，不修改 DSH 或 Desktop 的回环监听
 - 🔐 **独立设备令牌**：二维码五分钟有效，扫码后签发 HttpOnly/SameSite 设备 Cookie，可在电脑撤销
-- 📖 **配对 Reader**：已配对手机可访问 `http://电脑局域网IP:3080/reader`，并支持 Reader WebSocket
-- ⚙️ **网页配置页**：在 DSH 上游端口打开 `/wxb/config` 仍可修改 host 配置（Web Profile 为 `3081`）
+- 📖 **配对 Reader**：已配对手机可访问 `http://电脑局域网IP:3082/reader`，并支持 Reader WebSocket
+- ⚙️ **网页配置页**：在 DSH 上游端口打开 `/wxb/config` 仍可修改 host 配置（Web Profile 为 `3080`）
 - 🔌 **标准 DSH 插件包**：安装后同时挂载 host 与 Desktop/Web client，不改 DSH 内核
 
 ## 架构
@@ -41,10 +40,10 @@
 移动端远程使用第二条独立链路；Web Profile 与 Desktop 的上游端口分别独立：
 
 ```text
-已配对手机 ── HTTP / WebSocket / SSE ──► dsh-wechat-bridge 网关 0.0.0.0:3080
+已配对手机 ── HTTP / WebSocket / SSE ──► dsh-wechat-bridge 网关 0.0.0.0:3082
                                              │ 配对 Cookie、Host/Origin 校验、敏感路由阻断
                                              ▼
-                                      DSH Web 127.0.0.1:3081（Web Profile）
+                                      DSH Web 127.0.0.1:3080（Web Profile）
                                       或 DSH Desktop 127.0.0.1:<动态端口，例如 5541>
 ```
 
@@ -63,7 +62,7 @@ dsh plugin --profile web add github:xiagaogaozi/dsh-wechat-bridge
 ```bash
 cd /path/to/dsh-wechat-bridge
 npm pack
-dsh plugin --profile web add ./dsh-wechat-bridge-1.4.1.tgz
+dsh plugin --profile web add ./dsh-wechat-bridge-1.4.4.tgz
 ```
 
 不要再把 `index.js` 单独追加到 profile 的 `cordis.patch.yml`；那种旧安装方式只挂载 host，Desktop 无法发现 client 设置页。
@@ -81,26 +80,25 @@ dsh plugin --profile web add ./dsh-wechat-bridge-1.4.1.tgz
 ## 移动端远程
 
 在「远程控制」→「移动端远程」点击“启动移动端远程”。插件会创建独立的
-`0.0.0.0:3080` 网关，页面显示：
+`0.0.0.0:3082` 网关，页面显示：
 
-- `http://本机局域网IP:3080`
-- `http://本机局域网IP:3080/reader`
+- `http://本机局域网IP:3082`
+- `http://本机局域网IP:3082/reader`
 - 五分钟内有效的一次性配对二维码
 - 已配对设备及最近访问时间
 
 扫码后手机先交换一次性口令，再获得独立的 HttpOnly、SameSite=Strict
 设备 Cookie。未配对请求、跨站 Origin、非当前 LAN 接口及不可信 Host 会被拒绝；
 `/wxb/*`、Desktop 控制接口，以及 DSH 的设置、凭据、本机路径和 Agent Preset
-等回环特权 API 不会通过网关转发。停止网关会释放 3080、断开 WebSocket 并撤销
+等回环特权 API 不会通过网关转发。停止网关会释放 3082、断开 WebSocket 并撤销
 全部设备会话。
 
-网关原生流式转发 HTTP、WebSocket 和 SSE。手机加载同一个 DSH Web shell，
-但其 client bundle 已内置 `dsh-web-mobile` 的竖屏导航与响应式 UI，无需再把
-`dsh-web-mobile` 作为第二个 Profile 插件安装。
+网关原生流式转发 HTTP、WebSocket 和 SSE。手机加载同一个 DSH Web shell；
+移动端 UI 由用户自行安装的原版 `dsh-web-mobile` 插件提供，Bridge 不再内置或复制它。
 
 > 当前地址使用 HTTP；配对可以阻止未授权设备和跨站请求，但不能抵御已控制同一
 > 局域网链路的流量窃听。只应在可信的专用网络使用。Windows 防火墙应仅允许
-> Private 网络的 TCP 3080，并按需要进一步限制 WLAN/LocalSubnet。
+> Private 网络的 TCP 3082，并按需要进一步限制 WLAN/LocalSubnet。
 
 ## 配置页面
 
@@ -143,15 +141,8 @@ host 安装后无需碰终端：浏览器打开 **`http://127.0.0.1:<DSH上游�
   （`approvalPolicy: never` + workspace-write 沙箱）。多人使用务必自行加白名单
   （`bridge/bridge.js` 的 `WECHAT_ALLOW_USERS` 环境变量）。
 - 依赖 Node.js ≥ 22；`/wxb/*` 端点只允许回环请求，移动端网关明确阻止转发。
-- 普通 Web Profile 必须把自身从默认 3080 移到 3081，才能同时启动 3080 移动网关；
+- 普通 Web Profile 使用默认的 3080；移动网关独立使用 3082；
   DSH Desktop 继续使用自己的回环动态端口，不需要改 DSH 或 Desktop 核心源码。
-
-## 第三方 UI
-
-移动端 UI 派生自 MIT 许可的
-[`mexiaosqwq/dsh-web-mobile`](https://github.com/mexiaosqwq/dsh-web-mobile)，
-固定提交 `a96035f1b18162adefa5d322b24123159fb85855`。原始许可证保存在
-`vendor/dsh-web-mobile/LICENSE`，详情见 `THIRD_PARTY_NOTICES.md`。
 
 ## License
 
