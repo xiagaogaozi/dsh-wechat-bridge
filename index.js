@@ -1175,11 +1175,15 @@ export default {
       loadUserGen()
       ensureWechatWorkspace()
       startBridge()
-      return () => {
+      return async () => {
         stopping = true
         bridgeRestartNonce += 1
         if (bridgeProc) { try { bridgeProc.terminate() } catch (e) {} }
-        void mobileRemote.stop().catch((e) => console.error('[mobile-remote] stop failed:', e))
+        try {
+          await mobileRemote.stop()
+        } catch (e) {
+          console.error('[mobile-remote] stop failed:', e)
+        }
         for (const d of routeDisposers) { try { d() } catch (e) {} }
         routeDisposers.length = 0
       }

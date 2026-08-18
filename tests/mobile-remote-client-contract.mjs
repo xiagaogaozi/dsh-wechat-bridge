@@ -27,6 +27,8 @@ assert.match(client, /Reader：\$\{readerUrl\}/, 'The page must display the Read
 
 assert.match(host, /import \{ networkInterfaces \} from 'node:os'/, 'The host must derive the LAN address without shell commands.')
 assert.match(host, /createMobileRemoteGateway/, 'The host must own the second authenticated listener instead of modifying DSH or Desktop.')
+assert.match(host, /return async \(\) => \{[\s\S]*await mobileRemote\.stop\(\)/, 'The host disposer must await gateway shutdown so the port is released before unload completes.')
+assert.doesNotMatch(host, /void mobileRemote\.stop\(\)/, 'The host must not fire-and-forget gateway shutdown.')
 assert.match(gateway, /listen\(port, '0\.0\.0\.0'/, 'The plugin gateway must bind the selected all-interfaces address.')
 assert.match(gateway, /readerUrl:\s*url \? `\$\{url\}\/reader` : null/, 'The gateway must expose the Reader URL.')
 assert.match(gateway, /PRIVILEGED_API_METHODS/, 'The gateway must keep DSH loopback-only privileged API methods blocked.')

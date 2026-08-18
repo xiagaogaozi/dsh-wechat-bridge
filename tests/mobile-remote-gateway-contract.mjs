@@ -64,6 +64,19 @@ const websocketHandshake = ({ port, cookie }) => new Promise((resolve, reject) =
 })
 
 const upstream = createServer((req, res) => {
+  if (req.url === '/') {
+    const boot = {
+      rev: 'upstream-rev',
+      entries: [
+        { id: 'dsh-plugin-desktop', url: '/plugins/dsh-plugin-desktop/client.js?rev=desktop', inject: ['dsh-plugin-desktop'] },
+        { id: 'dshmarket', url: '/plugins/dshmarket/client.js?rev=market', inject: ['dsh-plugin-desktop', 'dshmarket'] },
+      ],
+    }
+    const html = `<!doctype html><html><head><script>window.__DSH_BOOT__ = ${JSON.stringify(boot)}</script></head><body>DSH</body></html>`
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    res.end(html)
+    return
+  }
   if (req.url === '/api/stream') {
     res.writeHead(200, { 'content-type': 'text/event-stream' })
     res.end('data: ok\n\n')
@@ -127,8 +140,18 @@ try {
 
   const home = await call({ port: gatewayPort, headers: authorizedHeaders })
   assert.equal(home.status, 200)
-  assert.deepEqual(JSON.parse(home.body), {
-    path: '/',
+  assert.doesNotMatch(home.body, /dsh-plugin-desktop/)
+  const boot = JSON.parse(home.body.match(/window\.__DSH_BOOT__ = (.+?)<\/script>/s)[1])
+  assert.deepEqual(boot.entries, [{
+    id: 'dshmarket',
+    url: '/plugins/dshmarket/client.js?rev=market',
+    inject: ['dshmarket'],
+  }])
+
+  const api = await call({ port: gatewayPort, path: '/api/ping', headers: authorizedHeaders })
+  assert.equal(api.status, 200)
+  assert.deepEqual(JSON.parse(api.body), {
+    path: '/api/ping',
     host: `127.0.0.1:${upstreamPort}`,
     origin: `http://127.0.0.1:${upstreamPort}`,
   })
@@ -157,4 +180,15 @@ try {
 }
 
 assert.equal(gateway.snapshot().enabled, false)
+
+const conflictGateway = createMobileRemoteGateway({
+  getTargetPort: () => gatewayPort,
+  getLanAddress: () => '127.0.0.1',
+  port: gatewayPort,
+  logger: { warn() {} },
+  createQr: async () => 'data:image/test,conflict',
+})
+await assert.rejects(() => conflictGateway.start(), /DSH 主服务已占用/)
+assert.equal(conflictGateway.snapshot().canStart, false)
+await conflictGateway.stop()
 console.log('mobile remote authenticated gateway contract: PASS')

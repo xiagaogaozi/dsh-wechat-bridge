@@ -5,6 +5,7 @@ const COOKIE_NAME = 'dsh_mobile_remote'
 const PAIRING_TTL_MS = 5 * 60 * 1000
 const DEVICE_TTL_SECONDS = 30 * 24 * 60 * 60
 const MAX_PAIR_BODY_BYTES = 4096
+const DEFAULT_BLOCKED_CLIENT_IDS = ['dsh-plugin-desktop']
 
 const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 const PRIVILEGED_API_METHODS = new Set([
@@ -26,6 +27,7 @@ const PRIVILEGED_API_METHODS = new Set([
 ])
 
 const hashToken = (value) => createHash('sha256').update(value).digest('hex')
+const shortHash = (value) => createHash('sha1').update(value).digest('hex').slice(0, 12)
 
 const safeEqual = (left, right) => {
   const leftBuffer = Buffer.from(String(left || ''))
@@ -127,6 +129,9 @@ const proxyHeaders = (req, targetPort) => {
   delete headers['x-forwarded-for']
   delete headers['x-forwarded-host']
   delete headers['x-forwarded-proto']
+  // The gateway may rewrite index.html. Ask the loopback upstream for a
+  // plain response so content-encoding cannot make the rewrite invalid.
+  headers['accept-encoding'] = 'identity'
   return headers
 }
 
@@ -139,11 +144,49 @@ const writeUpgradeHead = (socket, response) => {
   socket.write(`${lines.join('\r\n')}\r\n\r\n`)
 }
 
+const collectResponseBody = (response) => new Promise((resolve, reject) => {
+  const chunks = []
+  response.on('data', (chunk) => chunks.push(chunk))
+  response.on('end', () => resolve(Buffer.concat(chunks)))
+  response.on('error', reject)
+})
+
+/**
+ * The Desktop-only client package can be present in a shared Web profile, but
+ * its browser bundle requires a native Desktop mode that a phone does not
+ * have. The LAN gateway is the only surface that needs to hide that client
+ * row; the DSH host and its core client-module registry remain untouched.
+ */
+const rewriteBootManifest = (html, blockedClientIds) => {
+  const assignment = /window\.__DSH_BOOT__\s*=\s*/.exec(html)
+  if (!assignment) return html
+  const start = assignment.index + assignment[0].length
+  const end = html.indexOf('</script>', start)
+  if (end === -1) return html
+  const raw = html.slice(start, end).trim().replace(/;\s*$/, '')
+  let graph
+  try { graph = JSON.parse(raw) } catch { return html }
+  if (!graph || !Array.isArray(graph.entries)) return html
+  const blocked = new Set(blockedClientIds)
+  const entries = graph.entries
+    .filter((entry) => entry && !blocked.has(entry.id))
+    .map((entry) => {
+      if (!Array.isArray(entry.inject)) return entry
+      const inject = entry.inject.filter((id) => !blocked.has(id))
+      return inject.length === entry.inject.length ? entry : { ...entry, inject }
+    })
+  if (entries.length === graph.entries.length && entries.every((entry, index) => entry === graph.entries[index])) return html
+  const nextGraph = { ...graph, entries, rev: shortHash(JSON.stringify(entries)) }
+  const serialized = JSON.stringify(nextGraph).replaceAll('<', '\\u003c')
+  return html.slice(0, start) + serialized + html.slice(end)
+}
+
 export function createMobileRemoteGateway({
   getTargetPort,
   getLanAddress,
   port = 3080,
   blockedPrefixes = ['/wxb'],
+  blockedClientIds = DEFAULT_BLOCKED_CLIENT_IDS,
   logger = console,
   createQr = async (value, options) => {
     const QRCode = (await import('qrcode')).default
@@ -160,6 +203,7 @@ export function createMobileRemoteGateway({
   let lastError = null
   const sockets = new Set()
   const devices = new Map()
+  const blockedClients = [...blockedClientIds]
 
   const targetPort = () => Number(getTargetPort?.() || 0)
   const lanUrl = () => lanAddress ? `http://${lanAddress}:${port}` : null
@@ -233,9 +277,28 @@ export function createMobileRemoteGateway({
       method: req.method,
       path: req.url,
       headers: proxyHeaders(req, upstreamPort),
-    }, (upstreamResponse) => {
-      res.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers)
-      upstreamResponse.pipe(res)
+    }, async (upstreamResponse) => {
+      const contentType = String(upstreamResponse.headers['content-type'] || '').toLowerCase()
+      const contentEncoding = String(upstreamResponse.headers['content-encoding'] || '').toLowerCase()
+      const shouldRewrite = contentType.includes('text/html') && (!contentEncoding || contentEncoding === 'identity')
+      if (!shouldRewrite) {
+        res.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers)
+        upstreamResponse.pipe(res)
+        return
+      }
+      try {
+        const body = await collectResponseBody(upstreamResponse)
+        const rewritten = rewriteBootManifest(body.toString('utf8'), blockedClients)
+        const headers = { ...upstreamResponse.headers }
+        delete headers['transfer-encoding']
+        headers['content-length'] = String(Buffer.byteLength(rewritten))
+        res.writeHead(upstreamResponse.statusCode || 502, headers)
+        res.end(rewritten)
+      } catch (error) {
+        logger.warn?.('[mobile-remote] upstream HTML response failed:', error)
+        if (!res.headersSent) text(res, 502, 'DSH 上游响应失败')
+        else res.destroy(error)
+      }
     })
     upstream.on('error', (error) => {
       logger.warn?.('[mobile-remote] upstream request failed:', error)
@@ -300,7 +363,7 @@ export function createMobileRemoteGateway({
     if (!requestDevice(req)) return text(res, 401, '请先在电脑的“移动端远程”页面扫描配对二维码。')
     if (deniedPath(url.pathname, blockedPrefixes)) return text(res, 403, '此本机控制接口不允许通过移动端网关访问。')
     if (url.pathname.startsWith('/mobile-remote/')) return text(res, 404, 'not found')
-    proxyRequest(req, res)
+    return proxyRequest(req, res)
   }
 
   const handleUpgrade = (req, clientSocket, head) => {

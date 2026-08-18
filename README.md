@@ -23,7 +23,7 @@
 - 📱 **手机竖屏 UI**：内置迁移自 `mexiaosqwq/dsh-web-mobile` 1.0.0 的目录抽屉、会话头部、设置 sheet、文件/预览浮层和响应式排版
 - 🔐 **独立设备令牌**：二维码五分钟有效，扫码后签发 HttpOnly/SameSite 设备 Cookie，可在电脑撤销
 - 📖 **配对 Reader**：已配对手机可访问 `http://电脑局域网IP:3080/reader`，并支持 Reader WebSocket
-- ⚙️ **网页配置页**：`http://127.0.0.1:3080/wxb/config` 仍可修改 host 配置
+- ⚙️ **网页配置页**：在 DSH 上游端口打开 `/wxb/config` 仍可修改 host 配置（Web Profile 为 `3081`）
 - 🔌 **标准 DSH 插件包**：安装后同时挂载 host 与 Desktop/Web client，不改 DSH 内核
 
 ## 架构
@@ -38,13 +38,14 @@
                                                                             └────────────────────────────┘
 ```
 
-移动端远程使用第二条独立链路；Desktop 自身仍保持回环地址和动态端口：
+移动端远程使用第二条独立链路；Web Profile 与 Desktop 的上游端口分别独立：
 
 ```text
 已配对手机 ── HTTP / WebSocket / SSE ──► dsh-wechat-bridge 网关 0.0.0.0:3080
                                              │ 配对 Cookie、Host/Origin 校验、敏感路由阻断
                                              ▼
-                                      DSH Desktop 127.0.0.1:<动态端口>
+                                      DSH Web 127.0.0.1:3081（Web Profile）
+                                      或 DSH Desktop 127.0.0.1:<动态端口，例如 5541>
 ```
 
 ## 安装
@@ -62,7 +63,7 @@ dsh plugin --profile web add github:xiagaogaozi/dsh-wechat-bridge
 ```bash
 cd /path/to/dsh-wechat-bridge
 npm pack
-dsh plugin --profile web add ./dsh-wechat-bridge-1.4.0.tgz
+dsh plugin --profile web add ./dsh-wechat-bridge-1.4.1.tgz
 ```
 
 不要再把 `index.js` 单独追加到 profile 的 `cordis.patch.yml`；那种旧安装方式只挂载 host，Desktop 无法发现 client 设置页。
@@ -103,7 +104,7 @@ dsh plugin --profile web add ./dsh-wechat-bridge-1.4.0.tgz
 
 ## 配置页面
 
-host 安装后无需碰终端：浏览器打开 **`http://127.0.0.1:3080/wxb/config`**
+host 安装后无需碰终端：浏览器打开 **`http://127.0.0.1:<DSH上游端口>/wxb/config`**
 （与 `/wxb/qr` 同策略、仅 127.0.0.1 可访问），即可查看/修改全部配置并保存。
 保存的值写入 DSH 的 `settings.yaml`（`dsh-wechat-bridge` 命名空间），
 **覆盖** `cordis.patch.yml` 中 `config` 的同名字段；留空的字段回落到默认值。
@@ -142,8 +143,8 @@ host 安装后无需碰终端：浏览器打开 **`http://127.0.0.1:3080/wxb/con
   （`approvalPolicy: never` + workspace-write 沙箱）。多人使用务必自行加白名单
   （`bridge/bridge.js` 的 `WECHAT_ALLOW_USERS` 环境变量）。
 - 依赖 Node.js ≥ 22；`/wxb/*` 端点只允许回环请求，移动端网关明确阻止转发。
-- 普通 Web Profile 如果自身已占用 3080，不能同时启动第二网关；本功能面向保持
-  `127.0.0.1:<动态端口>` 的 DSH Desktop。
+- 普通 Web Profile 必须把自身从默认 3080 移到 3081，才能同时启动 3080 移动网关；
+  DSH Desktop 继续使用自己的回环动态端口，不需要改 DSH 或 Desktop 核心源码。
 
 ## 第三方 UI
 
