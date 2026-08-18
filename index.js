@@ -33,6 +33,7 @@
 import { networkInterfaces } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
+import { createMobileRemoteGateway } from './remote-gateway.js'
 
 const PACKAGE_DIR = fileURLToPath(new URL('.', import.meta.url))
 const LOGIN_TIMEOUT_EXIT_CODE = 75
@@ -99,6 +100,13 @@ export default {
     const BASE = cfg.base || '/wxb'
     const APPROVAL_POLICY = cfg.approvalPolicy || 'never'
     const GEN_FILE = BRIDGE_DIR + '/wechat-gen.json'
+    const mobileRemote = createMobileRemoteGateway({
+      getTargetPort: () => ws.port,
+      getLanAddress: preferredLanAddress,
+      port: 3080,
+      blockedPrefixes: [BASE],
+      logger: console,
+    })
 
     const state = {
       phase: 'idle',
@@ -648,19 +656,7 @@ export default {
       ...statusSnapshot(),
       qrImage: state.qrImage,
       qrUrl: state.qrUrl,
-      mobileRemote: (() => {
-        const lanAddress = preferredLanAddress()
-        const lanUrl = lanAddress ? `http://${lanAddress}:3080` : null
-        return {
-          enabled: false,
-          canStart: false,
-          phase: 'stopped',
-          detail: '安全配对边界尚未配置，移动端远程保持停止。',
-          lanAddress,
-          lanUrl,
-          readerUrl: lanUrl ? `${lanUrl}/reader` : null,
-        }
-      })(),
+      mobileRemote: mobileRemote.snapshot(),
     })
     const submitPairingCode = (raw) => {
       const code = String(raw || '').trim()
@@ -846,6 +842,34 @@ export default {
       }
       const body = await readBody(req)
       const action = String(body && body.action || '')
+      if (action === 'start-mobile-remote') {
+        try {
+          await mobileRemote.start()
+          return sendJson(res, 200, { ok: true, snapshot: desktopSnapshot() })
+        } catch (err) {
+          return sendJson(res, 500, { ok: false, error: '启动移动端远程失败：' + String((err && err.message) || err).slice(0, 240), snapshot: desktopSnapshot() })
+        }
+      }
+      if (action === 'stop-mobile-remote') {
+        try {
+          await mobileRemote.stop()
+          return sendJson(res, 200, { ok: true, snapshot: desktopSnapshot() })
+        } catch (err) {
+          return sendJson(res, 500, { ok: false, error: '停止移动端远程失败：' + String((err && err.message) || err).slice(0, 240), snapshot: desktopSnapshot() })
+        }
+      }
+      if (action === 'refresh-mobile-pairing') {
+        try {
+          await mobileRemote.rotatePairing()
+          return sendJson(res, 200, { ok: true, snapshot: desktopSnapshot() })
+        } catch (err) {
+          return sendJson(res, 400, { ok: false, error: '刷新移动端配对失败：' + String((err && err.message) || err).slice(0, 240), snapshot: desktopSnapshot() })
+        }
+      }
+      if (action === 'revoke-mobile-device') {
+        mobileRemote.revokeDevice(String(body && body.deviceId || '').slice(0, 64))
+        return sendJson(res, 200, { ok: true, snapshot: desktopSnapshot() })
+      }
       if (action === 'list-targets') {
         try {
           return sendJson(res, 200, { ok: true, ...(await listTargetWorkspaces()) })
@@ -882,7 +906,7 @@ export default {
     // Browser page showing the login QR — the host install has no GUI panel,
     // so this is how the user scans on first login. Also shows live status.
     routeDisposers.push(ws.register({ kind: 'exact', path: BASE + '/qr', handler: async (req, res) => {
-      // No auth on purpose: loopback-only status/QR page for host installs.
+      if (!isLoopbackRequest(req)) return sendJson(res, 403, { error: 'WeChat QR is available only from this computer' })
       const phase = state.phase
       const img = state.qrImage
       const url = state.qrUrl
@@ -990,11 +1014,12 @@ export default {
     }
 
     routeDisposers.push(ws.register({ kind: 'exact', path: BASE + '/config.json', handler: async (req, res) => {
-      // Loopback-only, same policy as /qr.
+      if (!isLoopbackRequest(req)) return sendJson(res, 403, { error: 'WeChat configuration is available only from this computer' })
       sendJson(res, 200, { config: currentConfig(), effective: statusSnapshot() })
     }}))
 
     routeDisposers.push(ws.register({ kind: 'exact', path: BASE + '/config', handler: async (req, res) => {
+      if (!isLoopbackRequest(req)) return sendJson(res, 403, { error: 'WeChat configuration is available only from this computer' })
       if (req.method === 'POST') {
         const body = await readBody(req)
         if (body && body.reset) {
@@ -1154,6 +1179,7 @@ export default {
         stopping = true
         bridgeRestartNonce += 1
         if (bridgeProc) { try { bridgeProc.terminate() } catch (e) {} }
+        void mobileRemote.stop().catch((e) => console.error('[mobile-remote] stop failed:', e))
         for (const d of routeDisposers) { try { d() } catch (e) {} }
         routeDisposers.length = 0
       }

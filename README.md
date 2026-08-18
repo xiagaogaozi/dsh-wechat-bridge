@@ -17,8 +17,12 @@
 - 🔄 **/new 保留旧对话**：新对话用轮次后缀创建，旧对话完整保存、随时回看
 - 📜 **/history 查询**：微信内直接列出/查看任意历史轮次
 - 🖼️ **媒体支持**：图片/文件自动落盘并给出路径，agent 可读取处理
-- 🖥️ **Desktop 设置页**：设置 →「微信桥接」内直接扫码、查看状态、提交手机显示的配对码
+- 🖥️ **Desktop 设置页**：设置列表只注册「远程控制」，页面内切换「微信桥接」和「移动端远程」
 - 🎯 **可选转发目标**：在 Desktop 设置页选择已有 DSH 工作区及其一个空闲对话，让微信消息继续写入该对话
+- 🌐 **配对后局域网访问**：插件独立监听 `0.0.0.0:3080`，不修改 DSH 或 Desktop 的回环监听
+- 📱 **手机竖屏 UI**：内置迁移自 `mexiaosqwq/dsh-web-mobile` 1.0.0 的目录抽屉、会话头部、设置 sheet、文件/预览浮层和响应式排版
+- 🔐 **独立设备令牌**：二维码五分钟有效，扫码后签发 HttpOnly/SameSite 设备 Cookie，可在电脑撤销
+- 📖 **配对 Reader**：已配对手机可访问 `http://电脑局域网IP:3080/reader`，并支持 Reader WebSocket
 - ⚙️ **网页配置页**：`http://127.0.0.1:3080/wxb/config` 仍可修改 host 配置
 - 🔌 **标准 DSH 插件包**：安装后同时挂载 host 与 Desktop/Web client，不改 DSH 内核
 
@@ -34,6 +38,15 @@
                                                                             └────────────────────────────┘
 ```
 
+移动端远程使用第二条独立链路；Desktop 自身仍保持回环地址和动态端口：
+
+```text
+已配对手机 ── HTTP / WebSocket / SSE ──► dsh-wechat-bridge 网关 0.0.0.0:3080
+                                             │ 配对 Cookie、Host/Origin 校验、敏感路由阻断
+                                             ▼
+                                      DSH Desktop 127.0.0.1:<动态端口>
+```
+
 ## 安装
 
 ### 安装到 Profile（推荐）
@@ -42,27 +55,51 @@
 dsh plugin --profile web add github:xiagaogaozi/dsh-wechat-bridge
 ```
 
-该命令把包加入 web profile 的依赖和 bundle 列表；包内 `cordis.patch.yml` 会同时注册 bridge host 与可被 Desktop/Web 加载的 client bundle。重启 DSH Desktop 后，打开设置列表中的「微信桥接」：首次登录在其中扫码；手机出现配对码时直接输入并提交。凭据保存在 `bridge/wechat-credentials/`，之后免扫码。
+该命令把包加入 web profile 的依赖和 bundle 列表；包内 `cordis.patch.yml` 会同时注册 bridge host 与可被 Desktop/Web 加载的 client bundle。重启 DSH Desktop 后，打开设置列表中的「远程控制」：首次登录在「微信桥接」中扫码；手机出现配对码时直接输入并提交。凭据保存在 `bridge/wechat-credentials/`，之后免扫码。
 
 ### 本地 tarball 安装
 
 ```bash
 cd /path/to/dsh-wechat-bridge
 npm pack
-dsh plugin --profile web add ./dsh-wechat-bridge-1.1.6.tgz
+dsh plugin --profile web add ./dsh-wechat-bridge-1.4.0.tgz
 ```
 
 不要再把 `index.js` 单独追加到 profile 的 `cordis.patch.yml`；那种旧安装方式只挂载 host，Desktop 无法发现 client 设置页。
 
 ## Desktop 扫码与配对码
 
-在 DSH Desktop 的设置列表选择「微信桥接」。该页每 2.5 秒刷新状态，展示二维码、扫码/在线状态、bridge PID，以及微信要求时出现的配对码输入框。点击「重新获取二维码」会受控重启 bridge；bridge 不再继承 Electron 的控制台，因此不会创建可见 Node 黑窗。二维码、配对码提交接口仅接受本机 loopback 请求，远程 Web 页面不能读取或提交它们。
+在 DSH Desktop 的设置列表选择「远程控制」→「微信桥接」。该页每 2.5 秒刷新状态，展示二维码、扫码/在线状态、bridge PID，以及微信要求时出现的配对码输入框。点击「重新获取二维码」会受控重启 bridge；bridge 不再继承 Electron 的控制台，因此不会创建可见 Node 黑窗。二维码、配对码提交接口仅接受本机 loopback 请求，远程 Web 页面不能读取或提交它们。
 
 ### 选择工作区和对话
 
 同一设置页的「微信转发目标」先列出 DSH 工作区，再只列出所选工作区内未归档的对话。选定两者后，微信收到的普通消息会继续写入该对话；插件不会移动该对话、修改其工作区、预设或模型。为了避免打断现有工作，正在运行的对话不能绑定；若之后它正在运行，微信消息会明确提示未写入而不是排队、取消或新建替代会话。
 
 未选择目标对话时，插件保持原有行为：每个微信用户拥有独立的 WeChat 会话，`/new` 和 `/history` 仍然可用。已绑定到指定对话时，`/new` 和 `/history` 不会改动该对话，请在 DSH 对话列表中管理其历史。
+
+## 移动端远程
+
+在「远程控制」→「移动端远程」点击“启动移动端远程”。插件会创建独立的
+`0.0.0.0:3080` 网关，页面显示：
+
+- `http://本机局域网IP:3080`
+- `http://本机局域网IP:3080/reader`
+- 五分钟内有效的一次性配对二维码
+- 已配对设备及最近访问时间
+
+扫码后手机先交换一次性口令，再获得独立的 HttpOnly、SameSite=Strict
+设备 Cookie。未配对请求、跨站 Origin、非当前 LAN 接口及不可信 Host 会被拒绝；
+`/wxb/*`、Desktop 控制接口，以及 DSH 的设置、凭据、本机路径和 Agent Preset
+等回环特权 API 不会通过网关转发。停止网关会释放 3080、断开 WebSocket 并撤销
+全部设备会话。
+
+网关原生流式转发 HTTP、WebSocket 和 SSE。手机加载同一个 DSH Web shell，
+但其 client bundle 已内置 `dsh-web-mobile` 的竖屏导航与响应式 UI，无需再把
+`dsh-web-mobile` 作为第二个 Profile 插件安装。
+
+> 当前地址使用 HTTP；配对可以阻止未授权设备和跨站请求，但不能抵御已控制同一
+> 局域网链路的流量窃听。只应在可信的专用网络使用。Windows 防火墙应仅允许
+> Private 网络的 TCP 3080，并按需要进一步限制 WLAN/LocalSubnet。
 
 ## 配置页面
 
@@ -104,7 +141,16 @@ host 安装后无需碰终端：浏览器打开 **`http://127.0.0.1:3080/wxb/con
 - 任何能给机器人发消息的人都获得一个带完整工具权限、免批准的 DSH agent
   （`approvalPolicy: never` + workspace-write 沙箱）。多人使用务必自行加白名单
   （`bridge/bridge.js` 的 `WECHAT_ALLOW_USERS` 环境变量）。
-- 依赖 Node.js ≥ 22；`/wxb/*` 端点仅监听 `127.0.0.1`。
+- 依赖 Node.js ≥ 22；`/wxb/*` 端点只允许回环请求，移动端网关明确阻止转发。
+- 普通 Web Profile 如果自身已占用 3080，不能同时启动第二网关；本功能面向保持
+  `127.0.0.1:<动态端口>` 的 DSH Desktop。
+
+## 第三方 UI
+
+移动端 UI 派生自 MIT 许可的
+[`mexiaosqwq/dsh-web-mobile`](https://github.com/mexiaosqwq/dsh-web-mobile)，
+固定提交 `a96035f1b18162adefa5d322b24123159fb85855`。原始许可证保存在
+`vendor/dsh-web-mobile/LICENSE`，详情见 `THIRD_PARTY_NOTICES.md`。
 
 ## License
 
