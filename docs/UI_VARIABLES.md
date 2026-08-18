@@ -2,11 +2,11 @@
 
 ## 适用范围
 
-本文件覆盖 `client.js` 注册到 DSH Desktop/Web 设置列表的“微信桥接”和“移动端远程”两个页面。运行时主题变量由 DeepSeek Harness 提供，变量源为 `packages/client/ui-theme/src/styles/design-platform.css`；本插件不声明或覆盖任何 CSS 自定义属性。
+本文件覆盖 `client.js` 注册到 DSH Desktop/Web 设置列表的“远程控制”设置页及其内部的“微信桥接”“移动端远程”导航页。运行时主题变量由 DeepSeek Harness 提供，变量源为 `packages/client/ui-theme/src/styles/design-platform.css`；本插件不声明或覆盖任何 CSS 自定义属性。
 
 ## 复用规则
 
-- 两个设置页分别通过 DSH 的 `settings.section` 槽位挂载，不自行创建窗口、主题或图标。
+- 仅“远程控制”通过 DSH 的 `settings.section` 槽位挂载；“微信桥接”和“移动端远程”是该页面内部导航，不自行创建窗口、主题或图标。
 - 操作控件仅使用 `@deepseek-ai/dsh-client-ui-primitives` 的 `Button` 与 `Input`。
 - 颜色、边框和状态表意只使用下表中 DSH 已有变量；布局尺寸沿用 DSH 设置页的 8/12/16px 间距节奏，不新增命名变量。
 
@@ -32,3 +32,4 @@
 - 2026-08-17：新增 Desktop “微信桥接”设置页，复用 DSH 的 `settings.section`、`Button`、`Input`、图标和上述主题变量；未新增、修改或覆盖任何 DSH 变量。
 - 2026-08-18：新增“微信转发目标”的工作区与对话选择控件，复用已有 `--dsw-alias-label-primary`、`--dsw-alias-label-tertiary`、`--dsw-alias-border-l2`、`--dsw-alias-bg-module-platform` 和 `Button`；未新增、修改或覆盖任何 DSH 变量。
 - 2026-08-18：拆分“微信桥接”与“移动端远程”两个设置导航页；移动端页新增停止状态、配对二维码占位、LAN/Reader 地址与安全提示，复用 `Button`、内置图标和现有 `--dsw-*` 变量；未新增、修改、废弃或覆盖任何 DSH 变量。
+- 2026-08-18：将微信桥接与移动端远程从两个 `settings.section` 注册项收敛为一个“远程控制”注册项；内部导航复用 `Button`、现有 `--dsw-*` 变量和 `--dsw-alias-border-l2`；未新增、修改或覆盖任何 DSH 变量。

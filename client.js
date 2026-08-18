@@ -19,10 +19,10 @@ window.__ModuleLoader__.load({
     const DESKTOP_ROUTE = '/plugins/dsh-wechat-bridge/desktop'
     const STYLE_ID = 'dsh-wechat-bridge-settings-style'
     const STYLE = `
-      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) { color: var(--dsw-alias-label-primary); display: flex; flex-direction: column; gap: 16px; font-size: 14px; line-height: 22px; }
-      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
-      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-title { margin: 0; color: var(--dsw-alias-label-primary); font-size: 16px; font-weight: 500; line-height: 24px; }
-      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-subtitle { margin: 4px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+      :is([data-dsh-remote-control-settings], [data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) { color: var(--dsw-alias-label-primary); display: flex; flex-direction: column; gap: 16px; font-size: 14px; line-height: 22px; }
+      :is([data-dsh-remote-control-settings], [data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+      :is([data-dsh-remote-control-settings], [data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-title { margin: 0; color: var(--dsw-alias-label-primary); font-size: 16px; font-weight: 500; line-height: 24px; }
+      :is([data-dsh-remote-control-settings], [data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-subtitle { margin: 4px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
       :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-status { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 12px; background: var(--dsw-alias-bg-module-platform); }
       :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-status-text { min-width: 0; flex: 1; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
       :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-pill { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 12px; line-height: 18px; }
@@ -46,6 +46,7 @@ window.__ModuleLoader__.load({
       [data-dsh-mobile-remote-settings] .wxb-remote-qr { width: min(240px, 100%); aspect-ratio: 1; box-sizing: border-box; display: flex; align-items: center; justify-content: center; padding: 16px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-tertiary); text-align: center; }
       [data-dsh-mobile-remote-settings] .wxb-address { width: min(560px, 100%); box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
       [data-dsh-mobile-remote-settings] .wxb-warning { display: flex; align-items: flex-start; gap: 8px; width: 100%; box-sizing: border-box; padding: 12px; border-radius: 12px; color: var(--dsw-alias-state-warn-label); background: var(--dsw-alias-state-warn-tertiary); font-size: 13px; line-height: 20px; }
+      [data-dsh-remote-control-settings] .wxb-tabs { display: flex; align-items: center; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
     `
 
     function installStyles() {
@@ -385,20 +386,51 @@ window.__ModuleLoader__.load({
             h('span', null, '当前 DSH 仍只监听 127.0.0.1；以上地址尚不能从手机访问。'))))
     }
 
+    function RemoteControlSettings() {
+      const [activePage, setActivePage] = useState('wechat')
+      const wechatActive = activePage === 'wechat'
+
+      return h('section', { 'data-dsh-remote-control-settings': '' },
+        h('div', { className: 'wxb-header' },
+          h('div', null,
+            h('h2', { className: 'wxb-title' }, '远程控制'),
+            h('p', { className: 'wxb-subtitle' }, '管理微信桥接与移动端远程访问。'))),
+        h('div', {
+          className: 'wxb-tabs',
+          role: 'tablist',
+          'aria-label': '远程控制页面',
+        },
+          h(Button, {
+            variant: wechatActive ? 'primary' : 'outline',
+            size: 'sm',
+            role: 'tab',
+            'aria-selected': wechatActive,
+            onClick: () => { setActivePage('wechat') },
+          }, '微信桥接'),
+          h(Button, {
+            variant: wechatActive ? 'outline' : 'primary',
+            size: 'sm',
+            role: 'tab',
+            'aria-selected': !wechatActive,
+            onClick: () => { setActivePage('mobile') },
+          }, '移动端远程')),
+        h('div', {
+          role: 'tabpanel',
+          'aria-label': wechatActive ? '微信桥接' : '移动端远程',
+        },
+          wechatActive
+            ? h(WeChatBridgeSettings, null)
+            : h(MobileRemoteSettings, null)))
+    }
+
     const inject = ['slots']
     function apply(ctx) {
       ctx.slots.inject('settings.section', () => ctx.slots.register({
         name: 'settings.section',
-        id: 'wechat-bridge',
+        id: 'remote-control',
         order: 60,
-        label: () => '微信桥接',
-      }, WeChatBridgeSettings))
-      ctx.slots.inject('settings.section', () => ctx.slots.register({
-        name: 'settings.section',
-        id: 'mobile-remote',
-        order: 61,
-        label: () => '移动端远程',
-      }, MobileRemoteSettings))
+        label: () => '远程控制',
+      }, RemoteControlSettings))
     }
 
     module.exports.inject = inject
