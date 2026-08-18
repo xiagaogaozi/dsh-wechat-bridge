@@ -35,7 +35,7 @@ assert.match(gateway, /PRIVILEGED_API_METHODS/, 'The gateway must keep DSH loopb
 assert.match(gateway, /COOKIE_NAME[\s\S]*HttpOnly; SameSite=Strict/, 'Paired devices must receive an HttpOnly same-site session cookie.')
 assert.match(client, /dsh-wechat-bridge\/mobile-ui/, 'The migrated dsh-web-mobile UI must be embedded in this plugin client.')
 assert.match(client, /id:\s*'mobile-nav-toggle'/, 'The migrated mobile directory controls must be registered.')
-assert.match(client, /\[data-mobile-nav="fab"\][\s\S]*position:\s*fixed !important[\s\S]*inset-inline-start:\s*10px !important/, 'The mobile directory fallback must be fixed to the viewport top-left.')
+assert.match(client, /\[data-mobile-nav="fab"\][\s\S]*position:\s*fixed !important[\s\S]*top:\s*calc\(env\(safe-area-inset-top, 0px\) \+ 8px\) !important[\s\S]*inset-inline-start:\s*10px !important/, 'The mobile directory fallback must be fixed to the viewport top-left.')
 assert.match(client, /\[class\$="_modes"\][\s\S]*\[aria-label\*="访问模式"\][\s\S]*display:\s*inline-flex !important/, 'The mobile permission mode must remain visible beside the plus control.')
 assert.match(client, /\[class\$="_primary"\]\[aria-label="发送消息"\][\s\S]*margin-left:\s*8px !important/, 'The mobile send control must remain at the trailing right edge.')
 assert.doesNotMatch(client, /--aion-|--ds-ease/, 'Migrated UI must use DSH --dsw-* theme variables only.')

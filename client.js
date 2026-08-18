@@ -910,14 +910,14 @@ exports.BASE_CSS = `
 }
 
 /* Floating fallback button (hero / blank phases without a session header).
-   The top clears the camera band below the status bar; when the client has
-   set viewport-fit=cover the safe-area inset moves it below the notch too. */
+   Keep the opener in the viewport's upper-left corner while still respecting
+   a device notch through the safe-area inset. */
 [data-mobile-nav="fab"] {
   /* The overlay is rendered below AppFrame. Fixed positioning keeps the
      fallback opener tied to the phone viewport instead of an intermediate
      grid/content containing block. */
   position: fixed !important;
-  top: calc(env(safe-area-inset-top, 0px) + 72px) !important;
+  top: calc(env(safe-area-inset-top, 0px) + 8px) !important;
   left: 10px !important;
   inset-inline-start: 10px !important;
   z-index: 21;
