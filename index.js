@@ -30,11 +30,30 @@
  *   base           - URL prefix for the bridge endpoints (default: /wxb)
  *   workspaceTitle - GUI workspace title (default: WeChat)
  */
+import { networkInterfaces } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 
 const PACKAGE_DIR = fileURLToPath(new URL('.', import.meta.url))
 const LOGIN_TIMEOUT_EXIT_CODE = 75
+
+const privateIpv4Rank = (address) => {
+  if (/^192\.168\./.test(address)) return 0
+  if (/^10\./.test(address)) return 1
+  const match = /^172\.(\d+)\./.exec(address)
+  if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return 2
+  return -1
+}
+
+const preferredLanAddress = () => Object.entries(networkInterfaces())
+  .flatMap(([name, entries]) => (entries || []).map((entry) => ({ name, ...entry })))
+  .filter((entry) => entry.family === 'IPv4' && !entry.internal && privateIpv4Rank(entry.address) >= 0)
+  .sort((left, right) => {
+    const addressRank = privateIpv4Rank(left.address) - privateIpv4Rank(right.address)
+    if (addressRank !== 0) return addressRank
+    const virtualPattern = /docker|radmin|tailscale|vethernet|virtual|vmware|wsl/i
+    return Number(virtualPattern.test(left.name)) - Number(virtualPattern.test(right.name))
+  })[0]?.address || null
 
 export default {
   inject: ['webServer', 'agents', 'timer', 'workspaceRegistry', 'sessionQuery'],
@@ -629,6 +648,19 @@ export default {
       ...statusSnapshot(),
       qrImage: state.qrImage,
       qrUrl: state.qrUrl,
+      mobileRemote: (() => {
+        const lanAddress = preferredLanAddress()
+        const lanUrl = lanAddress ? `http://${lanAddress}:3080` : null
+        return {
+          enabled: false,
+          canStart: false,
+          phase: 'stopped',
+          detail: '安全配对边界尚未配置，移动端远程保持停止。',
+          lanAddress,
+          lanUrl,
+          readerUrl: lanUrl ? `${lanUrl}/reader` : null,
+        }
+      })(),
     })
     const submitPairingCode = (raw) => {
       const code = String(raw || '').trim()

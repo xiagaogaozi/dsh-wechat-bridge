@@ -19,30 +19,33 @@ window.__ModuleLoader__.load({
     const DESKTOP_ROUTE = '/plugins/dsh-wechat-bridge/desktop'
     const STYLE_ID = 'dsh-wechat-bridge-settings-style'
     const STYLE = `
-      [data-dsh-wechat-bridge-settings] { color: var(--dsw-alias-label-primary); display: flex; flex-direction: column; gap: 16px; font-size: 14px; line-height: 22px; }
-      [data-dsh-wechat-bridge-settings] .wxb-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
-      [data-dsh-wechat-bridge-settings] .wxb-title { margin: 0; color: var(--dsw-alias-label-primary); font-size: 16px; font-weight: 500; line-height: 24px; }
-      [data-dsh-wechat-bridge-settings] .wxb-subtitle { margin: 4px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
-      [data-dsh-wechat-bridge-settings] .wxb-status { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 12px; background: var(--dsw-alias-bg-module-platform); }
-      [data-dsh-wechat-bridge-settings] .wxb-status-text { min-width: 0; flex: 1; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
-      [data-dsh-wechat-bridge-settings] .wxb-pill { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 12px; line-height: 18px; }
-      [data-dsh-wechat-bridge-settings] .wxb-pill-online { color: var(--dsw-alias-state-success-primary); background: var(--dsw-alias-state-success-tertiary); }
-      [data-dsh-wechat-bridge-settings] .wxb-pill-waiting { color: var(--dsw-alias-state-warn-label); background: var(--dsw-alias-state-warn-tertiary); }
-      [data-dsh-wechat-bridge-settings] .wxb-pill-error { color: var(--dsw-alias-state-error-primary); background: var(--dsw-alias-interactive-bg-hover-danger); }
-      [data-dsh-wechat-bridge-settings] .wxb-card { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; }
-      [data-dsh-wechat-bridge-settings] .wxb-card h3 { margin: 0; color: var(--dsw-alias-label-primary); font-size: 14px; font-weight: 500; line-height: 22px; }
-      [data-dsh-wechat-bridge-settings] .wxb-card p { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
-      [data-dsh-wechat-bridge-settings] .wxb-qr { width: min(240px, 100%); aspect-ratio: 1; box-sizing: border-box; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-static-neutral-00); image-rendering: pixelated; }
-      [data-dsh-wechat-bridge-settings] .wxb-pair-row { display: flex; width: min(360px, 100%); align-items: center; gap: 8px; }
-      [data-dsh-wechat-bridge-settings] .wxb-pair-row > span { flex: 1; min-width: 0; }
-      [data-dsh-wechat-bridge-settings] .wxb-target-fields { display: flex; width: min(560px, 100%); flex-direction: column; gap: 12px; }
-      [data-dsh-wechat-bridge-settings] .wxb-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
-      [data-dsh-wechat-bridge-settings] .wxb-field-label { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 20px; }
-      [data-dsh-wechat-bridge-settings] .wxb-select { width: 100%; min-height: 32px; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; line-height: 20px; padding: 5px 8px; }
-      [data-dsh-wechat-bridge-settings] .wxb-select:disabled { color: var(--dsw-alias-label-tertiary); }
-      [data-dsh-wechat-bridge-settings] .wxb-empty { color: var(--dsw-alias-label-tertiary); font-size: 13px; line-height: 20px; }
-      [data-dsh-wechat-bridge-settings] .wxb-error { display: flex; align-items: flex-start; gap: 8px; color: var(--dsw-alias-state-error-primary); font-size: 13px; line-height: 20px; }
-      [data-dsh-wechat-bridge-settings] .wxb-meta { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) { color: var(--dsw-alias-label-primary); display: flex; flex-direction: column; gap: 16px; font-size: 14px; line-height: 22px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-title { margin: 0; color: var(--dsw-alias-label-primary); font-size: 16px; font-weight: 500; line-height: 24px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-subtitle { margin: 4px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-status { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 12px; background: var(--dsw-alias-bg-module-platform); }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-status-text { min-width: 0; flex: 1; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-pill { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 12px; line-height: 18px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-pill-online { color: var(--dsw-alias-state-success-primary); background: var(--dsw-alias-state-success-tertiary); }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-pill-waiting { color: var(--dsw-alias-state-warn-label); background: var(--dsw-alias-state-warn-tertiary); }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-pill-error { color: var(--dsw-alias-state-error-primary); background: var(--dsw-alias-interactive-bg-hover-danger); }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-card { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-card h3 { margin: 0; color: var(--dsw-alias-label-primary); font-size: 14px; font-weight: 500; line-height: 22px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-card p { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-qr { width: min(240px, 100%); aspect-ratio: 1; box-sizing: border-box; padding: 8px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-static-neutral-00); image-rendering: pixelated; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-pair-row { display: flex; width: min(360px, 100%); align-items: center; gap: 8px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-pair-row > span { flex: 1; min-width: 0; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-target-fields { display: flex; width: min(560px, 100%); flex-direction: column; gap: 12px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-field { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-field-label { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 500; line-height: 20px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-select { width: 100%; min-height: 32px; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; line-height: 20px; padding: 5px 8px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-select:disabled { color: var(--dsw-alias-label-tertiary); }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-empty { color: var(--dsw-alias-label-tertiary); font-size: 13px; line-height: 20px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-error { display: flex; align-items: flex-start; gap: 8px; color: var(--dsw-alias-state-error-primary); font-size: 13px; line-height: 20px; }
+      :is([data-dsh-wechat-bridge-settings], [data-dsh-mobile-remote-settings]) .wxb-meta { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+      [data-dsh-mobile-remote-settings] .wxb-remote-qr { width: min(240px, 100%); aspect-ratio: 1; box-sizing: border-box; display: flex; align-items: center; justify-content: center; padding: 16px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-tertiary); text-align: center; }
+      [data-dsh-mobile-remote-settings] .wxb-address { width: min(560px, 100%); box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
+      [data-dsh-mobile-remote-settings] .wxb-warning { display: flex; align-items: flex-start; gap: 8px; width: 100%; box-sizing: border-box; padding: 12px; border-radius: 12px; color: var(--dsw-alias-state-warn-label); background: var(--dsw-alias-state-warn-tertiary); font-size: 13px; line-height: 20px; }
     `
 
     function installStyles() {
@@ -316,6 +319,72 @@ window.__ModuleLoader__.load({
           `bridge：${snapshot.bridgeAlive ? `运行中（PID ${snapshot.bridgePid || '—'}）` : '未运行'} · 微信用户：${(snapshot.users || []).length}`))
     }
 
+    function MobileRemoteSettings() {
+      const [snapshot, setSnapshot] = useState(null)
+      const [error, setError] = useState(null)
+
+      const refresh = useCallback(async () => {
+        try {
+          setSnapshot(await request('GET'))
+          setError(null)
+        } catch (err) {
+          setError(`无法读取移动端远程状态：${err instanceof Error ? err.message : String(err)}`)
+        }
+      }, [])
+
+      useEffect(() => {
+        installStyles()
+        let active = true
+        request('GET').then((data) => {
+          if (active) {
+            setSnapshot(data)
+            setError(null)
+          }
+        }).catch((err) => {
+          if (active) setError(`无法读取移动端远程状态：${err instanceof Error ? err.message : String(err)}`)
+        })
+        return () => { active = false }
+      }, [])
+
+      if (snapshot === null) {
+        return h('section', { 'data-dsh-mobile-remote-settings': '' },
+          h('div', { className: 'wxb-empty' }, error || '正在加载移动端远程状态…'))
+      }
+
+      const remote = snapshot.mobileRemote || {}
+      const lanUrl = remote.lanUrl || 'http://本机局域网IP:3080'
+      const readerUrl = remote.readerUrl || `${lanUrl}/reader`
+      return h('section', { 'data-dsh-mobile-remote-settings': '' },
+        h('div', { className: 'wxb-header' },
+          h('div', null,
+            h('h2', { className: 'wxb-title' }, '移动端远程'),
+            h('p', { className: 'wxb-subtitle' }, '通过安全配对在手机上访问 DSH；网络暴露尚未启用。')),
+          h(Button, {
+            variant: 'outline', size: 'sm', icon: h(IconRefreshOutline16, null),
+            onClick: () => { void refresh() },
+          }, '刷新')),
+        error === null ? null : h('div', { className: 'wxb-error', role: 'alert' },
+          h(IconWarningOutline16, { size: 16 }), h('span', null, error)),
+        h('div', { className: 'wxb-card' },
+          h('h3', null, '启动/停止移动端远程'),
+          h('div', { className: 'wxb-status', role: 'status' },
+            h('span', { className: 'wxb-pill wxb-pill-waiting' }, '已停止'),
+            h('span', { className: 'wxb-status-text' }, remote.detail || '移动端远程当前未启用。')),
+          h(Button, {
+            variant: 'primary', size: 'sm', disabled: true,
+          }, '启动移动端远程')),
+        h('div', { className: 'wxb-card' },
+          h('h3', null, '扫描配对'),
+          h('p', null, '安全配对与局域网监听启用后，使用手机扫描此处二维码。'),
+          h('div', { className: 'wxb-remote-qr', role: 'img', 'aria-label': '移动端配对二维码尚未生成' },
+            '等待安全配置后生成配对二维码'),
+          h('div', { className: 'wxb-address' }, lanUrl),
+          h('div', { className: 'wxb-meta' }, `Reader：${readerUrl}`),
+          h('div', { className: 'wxb-warning' },
+            h(IconWarningOutline16, { size: 16 }),
+            h('span', null, '当前 DSH 仍只监听 127.0.0.1；以上地址尚不能从手机访问。'))))
+    }
+
     const inject = ['slots']
     function apply(ctx) {
       ctx.slots.inject('settings.section', () => ctx.slots.register({
@@ -324,6 +393,12 @@ window.__ModuleLoader__.load({
         order: 60,
         label: () => '微信桥接',
       }, WeChatBridgeSettings))
+      ctx.slots.inject('settings.section', () => ctx.slots.register({
+        name: 'settings.section',
+        id: 'mobile-remote',
+        order: 61,
+        label: () => '移动端远程',
+      }, MobileRemoteSettings))
     }
 
     module.exports.inject = inject
