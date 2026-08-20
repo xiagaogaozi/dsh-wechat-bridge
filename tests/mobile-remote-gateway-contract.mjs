@@ -22,7 +22,7 @@ const reservePort = async () => {
 }
 
 const call = ({ port, path = '/', method = 'GET', headers = {}, body = '' }) => new Promise((resolve, reject) => {
-  const req = requestHttp({ hostname: '127.0.0.1', port, path, method, headers }, (res) => {
+  const req = requestHttp({ hostname: '127.0.0.1', port, path, method, headers, agent: false }, (res) => {
     const chunks = []
     res.on('data', (chunk) => chunks.push(chunk))
     res.on('end', () => resolve({
@@ -101,17 +101,24 @@ upstream.on('upgrade', (req, socket) => {
 const upstreamPort = await listen(upstream)
 const gatewayPort = await reservePort()
 let pairingUrl = null
+let persistedDevices = []
+const persistDevices = async (nextDevices) => {
+  persistedDevices = nextDevices
+}
 const gateway = createMobileRemoteGateway({
   getTargetPort: () => upstreamPort,
   getLanAddress: () => '127.0.0.1',
   port: gatewayPort,
   blockedPrefixes: ['/wxb'],
   logger: { warn() {} },
+  initialDevices: persistedDevices,
+  onDevicesChanged: persistDevices,
   createQr: async (value) => {
     pairingUrl = value
     return `data:image/test,${encodeURIComponent(value)}`
   },
 })
+let restoredGateway = null
 
 try {
   const started = await gateway.start()
@@ -137,6 +144,23 @@ try {
   const deviceId = JSON.parse(paired.body).deviceId
   const cookie = paired.headers['set-cookie'][0].split(';', 1)[0]
   const authorizedHeaders = { ...baseHeaders, cookie }
+  assert.equal(persistedDevices.length, 1, 'Pairing must persist one device record.')
+  assert.match(persistedDevices[0].tokenHash, /^[a-f0-9]{64}$/, 'Only a token hash may be persisted.')
+  assert.doesNotMatch(JSON.stringify(persistedDevices), new RegExp(cookie.split('=', 2)[1]), 'The raw browser token must not be persisted.')
+
+  await gateway.rotatePairing()
+  const repeatCode = new URL(pairingUrl).hash.slice(1)
+  const repeated = await call({
+    port: gatewayPort,
+    path: '/mobile-remote/pair',
+    method: 'POST',
+    headers: { ...authorizedHeaders, 'content-type': 'application/json', 'content-length': Buffer.byteLength(JSON.stringify({ code: repeatCode })) },
+    body: JSON.stringify({ code: repeatCode }),
+  })
+  assert.equal(repeated.status, 200)
+  assert.equal(JSON.parse(repeated.body).deviceId, deviceId, 'Rescanning in the already-paired browser must not create a second device.')
+  assert.equal(gateway.snapshot().devices.length, 1)
+  assert.equal(persistedDevices.length, 1)
 
   const home = await call({ port: gatewayPort, headers: authorizedHeaders })
   assert.equal(home.status, 200)
@@ -183,9 +207,25 @@ try {
   assert.equal(status.status, 200)
   assert.equal(JSON.parse(status.body).paired, true)
   assert.equal(gateway.snapshot().devices.length, 1)
-  gateway.revokeDevice(deviceId)
+
+  await gateway.stop()
+  restoredGateway = createMobileRemoteGateway({
+    getTargetPort: () => upstreamPort,
+    getLanAddress: () => '127.0.0.1',
+    port: gatewayPort,
+    blockedPrefixes: ['/wxb'],
+    logger: { warn() {} },
+    initialDevices: persistedDevices,
+    onDevicesChanged: persistDevices,
+    createQr: async () => 'data:image/test,restored',
+  })
+  await restoredGateway.start()
+  assert.equal((await call({ port: gatewayPort, headers: authorizedHeaders })).status, 200, 'A persisted device must remain authorized after gateway recreation.')
+  await restoredGateway.revokeDevice(deviceId)
+  assert.equal(persistedDevices.length, 0, 'Revocation must remove the durable device record.')
   assert.equal((await call({ port: gatewayPort, path: '/mobile-remote/status', headers: authorizedHeaders })).status, 401)
 } finally {
+  await restoredGateway?.stop()
   await gateway.stop()
   await close(upstream)
 }

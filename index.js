@@ -30,13 +30,15 @@
  *   base           - URL prefix for the bridge endpoints (default: /wxb)
  *   workspaceTitle - GUI workspace title (default: WeChat)
  */
-import { networkInterfaces } from 'node:os'
+import { homedir, networkInterfaces } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { createMobileRemoteGateway } from './remote-gateway.js'
 
 const PACKAGE_DIR = fileURLToPath(new URL('.', import.meta.url))
 const MOBILE_REMOTE_PORT = 3082
+const MOBILE_REMOTE_DEVICES_FILE = join(homedir(), '.dsh', 'storages', 'dsh-wechat-bridge-mobile-remote-devices.json')
 const LOGIN_TIMEOUT_EXIT_CODE = 75
 
 const privateIpv4Rank = (address) => {
@@ -101,11 +103,30 @@ export default {
     const BASE = cfg.base || '/wxb'
     const APPROVAL_POLICY = cfg.approvalPolicy || 'never'
     const GEN_FILE = BRIDGE_DIR + '/wechat-gen.json'
+    const loadMobileRemoteDevices = async () => {
+      if (!fsSvc) return []
+      try {
+        const target = await fsSvc.resolve(MOBILE_REMOTE_DEVICES_FILE)
+        const parsed = JSON.parse(await fsSvc.readText(target))
+        return Array.isArray(parsed?.devices) ? parsed.devices : []
+      } catch (e) {
+        // First use and a removed device file are both equivalent to no devices.
+        return []
+      }
+    }
+    const saveMobileRemoteDevices = async (devices) => {
+      if (!fsSvc) throw new Error('DSH 文件存储服务不可用，无法保存移动端配对记录。')
+      const target = await fsSvc.resolve(MOBILE_REMOTE_DEVICES_FILE)
+      await fsSvc.writeText(target, JSON.stringify({ version: 1, devices }))
+    }
+    const initialMobileRemoteDevices = await loadMobileRemoteDevices()
     const mobileRemote = createMobileRemoteGateway({
       getTargetPort: () => ws.port,
       getLanAddress: preferredLanAddress,
       port: MOBILE_REMOTE_PORT,
       blockedPrefixes: [BASE],
+      initialDevices: initialMobileRemoteDevices,
+      onDevicesChanged: saveMobileRemoteDevices,
       logger: console,
     })
 
@@ -868,8 +889,12 @@ export default {
         }
       }
       if (action === 'revoke-mobile-device') {
-        mobileRemote.revokeDevice(String(body && body.deviceId || '').slice(0, 64))
-        return sendJson(res, 200, { ok: true, snapshot: desktopSnapshot() })
+        try {
+          await mobileRemote.revokeDevice(String(body && body.deviceId || '').slice(0, 64))
+          return sendJson(res, 200, { ok: true, snapshot: desktopSnapshot() })
+        } catch (err) {
+          return sendJson(res, 500, { ok: false, error: '撤销移动设备失败：' + String((err && err.message) || err).slice(0, 240), snapshot: desktopSnapshot() })
+        }
       }
       if (action === 'list-targets') {
         try {

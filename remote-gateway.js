@@ -28,6 +28,7 @@ const PRIVILEGED_API_METHODS = new Set([
 
 const hashToken = (value) => createHash('sha256').update(value).digest('hex')
 const shortHash = (value) => createHash('sha1').update(value).digest('hex').slice(0, 12)
+const TOKEN_HASH_PATTERN = /^[a-f0-9]{64}$/
 
 const safeEqual = (left, right) => {
   const leftBuffer = Buffer.from(String(left || ''))
@@ -151,6 +152,26 @@ const collectResponseBody = (response) => new Promise((resolve, reject) => {
   response.on('error', reject)
 })
 
+const normaliseTimestamp = (value) => {
+  const timestamp = Number(value)
+  return Number.isFinite(timestamp) && timestamp >= 0 ? Math.trunc(timestamp) : Date.now()
+}
+
+const normalisePersistedDevice = (value) => {
+  if (!value || typeof value !== 'object') return null
+  const tokenHash = String(value.tokenHash || '').toLowerCase()
+  if (!TOKEN_HASH_PATTERN.test(tokenHash)) return null
+  const pairedAt = normaliseTimestamp(value.pairedAt)
+  return {
+    // The id is derived from the token hash; never trust a mutable stored id.
+    id: tokenHash.slice(0, 12),
+    name: String(value.name || '移动设备').slice(0, 120),
+    pairedAt,
+    lastSeenAt: normaliseTimestamp(value.lastSeenAt || pairedAt),
+    tokenHash,
+  }
+}
+
 /**
  * The Desktop-only client package can be present in a shared Web profile, but
  * its browser bundle requires a native Desktop mode that a phone does not
@@ -187,6 +208,8 @@ export function createMobileRemoteGateway({
   port = 3082,
   blockedPrefixes = ['/wxb'],
   blockedClientIds = DEFAULT_BLOCKED_CLIENT_IDS,
+  initialDevices = [],
+  onDevicesChanged,
   logger = console,
   createQr = async (value, options) => {
     const QRCode = (await import('qrcode')).default
@@ -201,9 +224,17 @@ export function createMobileRemoteGateway({
   let pairingExpiresAt = null
   let pairingQrImage = null
   let lastError = null
+  let persistenceTail = Promise.resolve()
   const sockets = new Set()
   const devices = new Map()
   const blockedClients = [...blockedClientIds]
+
+  for (const rawDevice of Array.isArray(initialDevices) ? initialDevices : []) {
+    const device = normalisePersistedDevice(rawDevice)
+    if (!device) continue
+    const existing = devices.get(device.tokenHash)
+    if (!existing || device.lastSeenAt >= existing.lastSeenAt) devices.set(device.tokenHash, device)
+  }
 
   const targetPort = () => Number(getTargetPort?.() || 0)
   const lanUrl = () => lanAddress ? `http://${lanAddress}:${port}` : null
@@ -211,6 +242,23 @@ export function createMobileRemoteGateway({
   const publicDevices = () => [...devices.values()]
     .sort((left, right) => right.lastSeenAt - left.lastSeenAt)
     .map(({ tokenHash: _tokenHash, ...device }) => ({ ...device }))
+
+  const persistedDevices = () => [...devices.values()]
+    .map((device) => ({
+      id: device.id,
+      name: device.name,
+      pairedAt: device.pairedAt,
+      lastSeenAt: device.lastSeenAt,
+      tokenHash: device.tokenHash,
+    }))
+
+  const persistDevices = () => {
+    if (typeof onDevicesChanged !== 'function') return Promise.resolve()
+    const nextDevices = persistedDevices()
+    const write = persistenceTail.catch(() => {}).then(() => onDevicesChanged(nextDevices))
+    persistenceTail = write
+    return write
+  }
 
   const snapshot = () => {
     const upstreamPort = targetPort()
@@ -337,6 +385,18 @@ export function createMobileRemoteGateway({
       if (!pairingSecret || !pairingExpiresAt || pairingExpiresAt < Date.now() || !safeEqual(code, pairingSecret)) {
         return json(res, 401, { error: '配对二维码无效或已过期，请回到电脑刷新。' })
       }
+      const existingDevice = requestDevice(req)
+      if (existingDevice) {
+        pairingSecret = null
+        pairingExpiresAt = null
+        pairingQrImage = null
+        const result = json(res, 200, { ok: true, deviceId: existingDevice.id, reused: true })
+        void rotatePairing().catch((error) => {
+          lastError = String(error?.message || error)
+          logger.warn?.('[mobile-remote] pairing rotation failed:', error)
+        })
+        return result
+      }
       const token = randomBytes(32).toString('base64url')
       const tokenHash = hashToken(token)
       const now = Date.now()
@@ -348,6 +408,15 @@ export function createMobileRemoteGateway({
         lastSeenAt: now,
         tokenHash,
       })
+      try {
+        // Do not hand a browser a durable cookie until its token hash is saved.
+        await persistDevices()
+      } catch (error) {
+        devices.delete(tokenHash)
+        lastError = String(error?.message || error)
+        logger.warn?.('[mobile-remote] device persistence failed:', error)
+        return json(res, 500, { error: '配对记录保存失败，请稍后重新扫描。' })
+      }
       pairingSecret = null
       pairingExpiresAt = null
       pairingQrImage = null
@@ -469,15 +538,33 @@ export function createMobileRemoteGateway({
         for (const socket of sockets) socket.destroy()
       })
     }
+    try {
+      await persistenceTail
+    } catch (error) {
+      logger.warn?.('[mobile-remote] pending device persistence failed:', error)
+    }
     sockets.clear()
     phase = 'stopped'
     detail = '移动端远程已停止，3082 端口已释放。'
     return snapshot()
   }
 
-  const revokeDevice = (id) => {
+  const revokeDevice = async (id) => {
+    const removed = []
     for (const [tokenHash, device] of devices) {
-      if (device.id === id) devices.delete(tokenHash)
+      if (device.id === id) {
+        removed.push([tokenHash, device])
+        devices.delete(tokenHash)
+      }
+    }
+    if (!removed.length) return snapshot()
+    try {
+      await persistDevices()
+    } catch (error) {
+      for (const [tokenHash, device] of removed) devices.set(tokenHash, device)
+      lastError = String(error?.message || error)
+      logger.warn?.('[mobile-remote] device revocation persistence failed:', error)
+      throw error
     }
     return snapshot()
   }
