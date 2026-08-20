@@ -30,15 +30,13 @@
  *   base           - URL prefix for the bridge endpoints (default: /wxb)
  *   workspaceTitle - GUI workspace title (default: WeChat)
  */
-import { homedir, networkInterfaces } from 'node:os'
-import { join } from 'node:path'
+import { networkInterfaces } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import z from '@deepseek-ai/schemastery'
 import { createMobileRemoteGateway } from './remote-gateway.js'
 
 const PACKAGE_DIR = fileURLToPath(new URL('.', import.meta.url))
 const MOBILE_REMOTE_PORT = 3082
-const MOBILE_REMOTE_DEVICES_FILE = join(homedir(), '.dsh', 'storages', 'dsh-wechat-bridge-mobile-remote-devices.json')
 const LOGIN_TIMEOUT_EXIT_CODE = 75
 
 const privateIpv4Rank = (address) => {
@@ -79,6 +77,14 @@ export default {
           workspaceTitle: z.string(),
           targetWorkspaceId: z.string(),
           targetSessionId: z.string(),
+          // Private persistence only: the Desktop UI never renders this field.
+          mobileRemoteDevices: z.array(z.object({
+            id: z.string(),
+            name: z.string(),
+            pairedAt: z.number(),
+            lastSeenAt: z.number(),
+            tokenHash: z.string(),
+          })),
         }), {})
         const saved = settingsSvc.get('dsh-wechat-bridge')
         if (saved && typeof saved === 'object') cfg = { ...cfg, ...saved }
@@ -103,23 +109,18 @@ export default {
     const BASE = cfg.base || '/wxb'
     const APPROVAL_POLICY = cfg.approvalPolicy || 'never'
     const GEN_FILE = BRIDGE_DIR + '/wechat-gen.json'
-    const loadMobileRemoteDevices = async () => {
-      if (!fsSvc) return []
-      try {
-        const target = await fsSvc.resolve(MOBILE_REMOTE_DEVICES_FILE)
-        const parsed = JSON.parse(await fsSvc.readText(target))
-        return Array.isArray(parsed?.devices) ? parsed.devices : []
-      } catch (e) {
-        // First use and a removed device file are both equivalent to no devices.
-        return []
-      }
-    }
+    // DSH's fs service is workspace-write sandboxed, so durable pairing state
+    // belongs in this plugin's own settings namespace rather than ~/.dsh/storages.
+    // Only the gateway's SHA-256 token hashes are stored; pairing secrets/cookies stay ephemeral.
+    const loadMobileRemoteDevices = () => Array.isArray(cfg.mobileRemoteDevices)
+      ? cfg.mobileRemoteDevices.map((device) => ({ ...device }))
+      : []
     const saveMobileRemoteDevices = async (devices) => {
-      if (!fsSvc) throw new Error('DSH 文件存储服务不可用，无法保存移动端配对记录。')
-      const target = await fsSvc.resolve(MOBILE_REMOTE_DEVICES_FILE)
-      await fsSvc.writeText(target, JSON.stringify({ version: 1, devices }))
+      if (!settingsSvc) throw new Error('DSH 设置服务不可用，无法保存移动端配对记录。')
+      await settingsSvc.update('dsh-wechat-bridge', { mobileRemoteDevices: devices })
+      cfg = { ...cfg, mobileRemoteDevices: devices }
     }
-    const initialMobileRemoteDevices = await loadMobileRemoteDevices()
+    const initialMobileRemoteDevices = loadMobileRemoteDevices()
     const mobileRemote = createMobileRemoteGateway({
       getTargetPort: () => ws.port,
       getLanAddress: preferredLanAddress,
@@ -1052,8 +1053,10 @@ export default {
           // Restore composition defaults: drop every saved override.
           try {
             const before = currentConfig()
-            if (settingsSvc) await settingsSvc.replace('dsh-wechat-bridge', {})
-            cfg = { ...(config || {}) }
+            // Resetting bridge options must not silently revoke paired phones.
+            const preservedMobileRemoteDevices = loadMobileRemoteDevices()
+            if (settingsSvc) await settingsSvc.replace('dsh-wechat-bridge', { mobileRemoteDevices: preservedMobileRemoteDevices })
+            cfg = { ...(config || {}), mobileRemoteDevices: preservedMobileRemoteDevices }
             SECRET = cfg.secret || 'dsh-wechat-bridge-local-token'
             const after = currentConfig()
             const changed = CONFIG_KEYS.filter((k) => (before[k] || '') !== (after[k] || ''))
